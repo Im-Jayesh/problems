@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { Send, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 
-export default function ProblemInput() {
+export default function ProblemInput({ onMerged }: { onMerged?: (id: string) => void }) {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -45,8 +45,16 @@ export default function ProblemInput() {
         toast("Category unclear. Please specify a broad category.", 'error');
       } else if (data.status === 'borderline') {
         setBorderlineMatch(data);
+      } else if (data.status === 'merged') {
+        toast("Merged with a similar problem!", 'success');
+        localStorage.setItem(`plus_one_${data.clusterId}`, 'true');
+        if (onMerged) onMerged(data.clusterId);
+        setText('');
+        setNeedsCategory(false);
+        setUserCategory('');
       } else {
         toast("Problem successfully dropped!", 'success');
+        localStorage.setItem(`plus_one_${data.clusterId}`, 'true');
         setText('');
         setNeedsCategory(false);
         setUserCategory('');
@@ -70,6 +78,8 @@ export default function ProblemInput() {
         clusterId: borderlineMatch.match.id 
       })
     });
+    localStorage.setItem(`plus_one_${borderlineMatch.match.id}`, 'true');
+    if (onMerged) onMerged(borderlineMatch.match.id);
     toast("Bubbles merged successfully!", 'success');
     setBorderlineMatch(null);
     setText('');
@@ -80,7 +90,7 @@ export default function ProblemInput() {
   const handleConfirmNew = async () => {
     setLoading(true);
     setStatusMsg("Creating new bubble...");
-    await fetch('/api/problems/confirm-new', {
+    const res = await fetch('/api/problems/confirm-new', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
@@ -88,6 +98,8 @@ export default function ProblemInput() {
         embedding: borderlineMatch.embedding 
       })
     });
+    const data = await res.json();
+    if (data.clusterId) localStorage.setItem(`plus_one_${data.clusterId}`, 'true');
     toast("New bubble created!", 'success');
     setBorderlineMatch(null);
     setText('');
@@ -101,6 +113,7 @@ export default function ProblemInput() {
         <div style={{ position: 'relative', width: '100%', display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <input
             className="problem-input"
+            style={{ paddingRight: '45px' }}
             value={text}
             onChange={(e) => setText(e.target.value)}
             placeholder="What's bugging you right now?"

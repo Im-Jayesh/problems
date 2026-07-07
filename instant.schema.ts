@@ -22,6 +22,12 @@ export const schema = i.schema({
       text: i.string(),
       createdAt: i.number(),
     }),
+    claims: i.entity({
+      name: i.string(),
+      link: i.string(),
+      message: i.string(),
+      createdAt: i.number(),
+    }),
   },
   links: {
     clusterProblems: {
@@ -32,6 +38,18 @@ export const schema = i.schema({
       },
       reverse: {
         on: 'problems',
+        has: 'one',
+        label: 'cluster',
+      },
+    },
+    clusterClaims: {
+      forward: {
+        on: 'clusters',
+        has: 'many',
+        label: 'claims',
+      },
+      reverse: {
+        on: 'claims',
         has: 'one',
         label: 'cluster',
       },

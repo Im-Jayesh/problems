@@ -6,10 +6,14 @@ import { db } from '@/lib/db';
 type BubbleCanvasProps = {
   onBubbleClick: (id: string) => void;
   focusBubbleId?: string | null;
+  glowBubbleId?: string | null;
 };
 
-// Palette for random assignments
-const PALETTE = ['#AEB4A9', '#D89A9E', '#C37D92', '#846267'];
+// Expanded palette for categories
+const PALETTE = [
+  '#AEB4A9', '#D89A9E', '#C37D92', '#846267', 
+  '#F4A261', '#E76F51', '#2A9D8F', '#E9C46A', '#264653', '#A8DADC', '#457B9D'
+];
 
 const getCategoryColor = (category?: string) => {
   if (!category || category === 'Unknown') return PALETTE[0];
@@ -34,7 +38,7 @@ const getCategoryGravity = (category?: string) => {
   };
 };
 
-function drawAmoeba(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, time: number, seed: number, color: string, isClaimed: boolean) {
+function drawAmoeba(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, time: number, seed: number, color: string, isClaimed: boolean, submissionCount: number = 1) {
   const points = 10;
   const vertices = [];
   
@@ -76,9 +80,9 @@ function drawAmoeba(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   ctx.stroke();
 }
 
-export default function BubbleCanvas({ onBubbleClick, focusBubbleId }: BubbleCanvasProps) {
+export default function BubbleCanvas({ onBubbleClick, focusBubbleId, glowBubbleId }: BubbleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { data } = db.useQuery({ clusters: {} });
+  const { data } = db.useQuery({ clusters: { claims: {} } });
   
   // Persist physics state outside of React's render cycle
   const physicsState = useRef<{ [id: string]: any }>({});
@@ -127,6 +131,7 @@ export default function BubbleCanvas({ onBubbleClick, focusBubbleId }: BubbleCan
       if (!physicsState.current[cluster.id]) {
         physicsState.current[cluster.id] = {
           ...cluster,
+          hasClaims: cluster.claims && cluster.claims.length > 0,
           // Spawn in world space around origin
           x: (Math.random() - 0.5) * 1000,
           y: (Math.random() - 0.5) * 1000,
@@ -136,15 +141,17 @@ export default function BubbleCanvas({ onBubbleClick, focusBubbleId }: BubbleCan
           radius: 0, // Animate in from 0
           color: getCategoryColor(cluster.category),
           seed: Math.random() * 100,
+          submissionCount: cluster.submissionCount || 1,
         };
       } else {
         // Update data but keep physics intact
         physicsState.current[cluster.id].title = cluster.title;
         physicsState.current[cluster.id].totalWeight = cluster.totalWeight;
-        physicsState.current[cluster.id].claimedByName = cluster.claimedByName;
+        physicsState.current[cluster.id].hasClaims = cluster.claims && cluster.claims.length > 0;
         physicsState.current[cluster.id].targetRadius = targetRadius;
         physicsState.current[cluster.id].category = cluster.category;
         physicsState.current[cluster.id].color = getCategoryColor(cluster.category);
+        physicsState.current[cluster.id].submissionCount = cluster.submissionCount || 1;
       }
     });
   }, [data]);
@@ -303,7 +310,21 @@ export default function BubbleCanvas({ onBubbleClick, focusBubbleId }: BubbleCan
         b.y += b.vy;
 
         // Draw organic amoeba
-        drawAmoeba(ctx, b.x, b.y, b.radius, time, b.seed, b.color, !!b.claimedByName);
+        ctx.save();
+        if (glowBubbleId && b.id === glowBubbleId) {
+          // Intense pulse effect using time
+          const pulse = Math.sin(time * 0.005) * 0.5 + 0.5;
+          ctx.shadowColor = b.color;
+          ctx.shadowBlur = 60 + (pulse * 40);
+          
+          // Draw an extra background glow layer
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.radius + 15, 0, Math.PI * 2);
+          ctx.fillStyle = b.color + '66'; // 40% opacity
+          ctx.fill();
+        }
+        drawAmoeba(ctx, b.x, b.y, b.radius, time, b.seed, b.color, b.hasClaims, b.submissionCount);
+        ctx.restore();
 
         // Draw text
         ctx.fillStyle = '#4A3A3D';
