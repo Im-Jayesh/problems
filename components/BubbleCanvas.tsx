@@ -311,19 +311,15 @@ export default function BubbleCanvas({ onBubbleClick, focusBubbleId, glowBubbleI
 
         // Draw organic amoeba
         ctx.save();
+        let drawColor = b.color;
+        
         if (glowBubbleId && b.id === glowBubbleId) {
-          // Intense pulse effect using time
-          const pulse = Math.sin(time * 0.005) * 0.5 + 0.5;
-          ctx.shadowColor = b.color;
-          ctx.shadowBlur = 60 + (pulse * 40);
-          
-          // Draw an extra background glow layer
-          ctx.beginPath();
-          ctx.arc(b.x, b.y, b.radius + 15, 0, Math.PI * 2);
-          ctx.fillStyle = b.color + '66'; // 40% opacity
-          ctx.fill();
+          // Flicker through all colors in the palette rapidly (every 50ms)
+          const colorIndex = Math.floor(time / 50) % PALETTE.length;
+          drawColor = PALETTE[colorIndex];
         }
-        drawAmoeba(ctx, b.x, b.y, b.radius, time, b.seed, b.color, b.hasClaims, b.submissionCount);
+        
+        drawAmoeba(ctx, b.x, b.y, b.radius, time, b.seed, drawColor, b.hasClaims, b.submissionCount);
         ctx.restore();
 
         // Draw text
