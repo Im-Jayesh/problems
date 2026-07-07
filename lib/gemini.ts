@@ -19,10 +19,11 @@ export async function checkModeration(text: string): Promise<{ isSafe: boolean, 
           toxic: { type: SchemaType.BOOLEAN },
           containsNames: { type: SchemaType.BOOLEAN },
           isSpam: { type: SchemaType.BOOLEAN },
+          isProblem: { type: SchemaType.BOOLEAN, description: "True if the text is actually describing a problem, annoyance, or issue. False if it is just random text, a greeting, a joke, or a generic statement." },
           reason: { type: SchemaType.STRING },
           category: { type: SchemaType.STRING, description: "A broad 1-2 word category for this problem (e.g., Transportation, Software, Health, Finance). Return 'Unknown' if the text is too vague to categorize." }
         },
-        required: ["toxic", "containsNames", "isSpam", "reason", "category"]
+        required: ["toxic", "containsNames", "isSpam", "isProblem", "reason", "category"]
       }
     }
   });
@@ -32,6 +33,7 @@ Evaluate the following text and determine if it violates our policies:
 1. No toxicity, hate speech, self-harm, or severe distress.
 2. No real names of individuals (public figures are okay, but avoid personal attacks).
 3. No advertisements, promotional links, or spam.
+4. The input MUST be an actual problem, annoyance, or complaint. If it is just a greeting, a joke, random keyboard mashing, or a generic statement, mark isProblem as false.
 
 Text to evaluate: "${text}"`;
 
@@ -41,6 +43,10 @@ Text to evaluate: "${text}"`;
     
     if (response.toxic || response.containsNames || response.isSpam) {
       return { isSafe: false, reason: response.reason };
+    }
+    
+    if (response.isProblem === false) {
+      return { isSafe: false, reason: "This doesn't seem like a real problem. Please describe an actual issue or annoyance." };
     }
     
     return {

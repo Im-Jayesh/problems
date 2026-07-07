@@ -5,10 +5,34 @@ import { db } from '@/lib/db';
 
 type BubbleCanvasProps = {
   onBubbleClick: (id: string) => void;
+  focusBubbleId?: string | null;
 };
 
 // Palette for random assignments
 const PALETTE = ['#AEB4A9', '#D89A9E', '#C37D92', '#846267'];
+
+const getCategoryColor = (category?: string) => {
+  if (!category || category === 'Unknown') return PALETTE[0];
+  let hash = 0;
+  for (let i = 0; i < category.length; i++) {
+    hash = category.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return PALETTE[Math.abs(hash) % PALETTE.length];
+};
+
+const getCategoryGravity = (category?: string) => {
+  if (!category || category === 'Unknown') return { x: 0, y: 0 };
+  let hash = 0;
+  for (let i = 0; i < category.length; i++) {
+    hash = category.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const angle = (Math.abs(hash) % 360) * (Math.PI / 180);
+  const distance = 800; // Orbit distance from world origin
+  return {
+    x: Math.cos(angle) * distance,
+    y: Math.sin(angle) * distance
+  };
+};
 
 function drawAmoeba(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, time: number, seed: number, color: string, isClaimed: boolean) {
   const points = 10;
@@ -52,12 +76,20 @@ function drawAmoeba(ctx: CanvasRenderingContext2D, x: number, y: number, r: numb
   ctx.stroke();
 }
 
-export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
+export default function BubbleCanvas({ onBubbleClick, focusBubbleId }: BubbleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { data } = db.useQuery({ clusters: {} });
   
-  // Persist physics state outside of React's render cycle so bubbles don't teleport when data updates
+  // Persist physics state outside of React's render cycle
   const physicsState = useRef<{ [id: string]: any }>({});
+  
+  // Camera state for the infinite canvas
+  const camera = useRef({ x: 0, y: 0, zoom: 1 });
+  const targetBubbleId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (focusBubbleId) targetBubbleId.current = focusBubbleId;
+  }, [focusBubbleId]);
 
   // 1. Handle Canvas Resize
   useEffect(() => {
@@ -95,13 +127,14 @@ export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
       if (!physicsState.current[cluster.id]) {
         physicsState.current[cluster.id] = {
           ...cluster,
-          x: Math.random() * window.innerWidth,
-          y: Math.random() * window.innerHeight,
+          // Spawn in world space around origin
+          x: (Math.random() - 0.5) * 1000,
+          y: (Math.random() - 0.5) * 1000,
           vx: 0,
           vy: 0,
           targetRadius,
           radius: 0, // Animate in from 0
-          color: PALETTE[i % PALETTE.length],
+          color: getCategoryColor(cluster.category),
           seed: Math.random() * 100,
         };
       } else {
@@ -111,11 +144,12 @@ export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
         physicsState.current[cluster.id].claimedByName = cluster.claimedByName;
         physicsState.current[cluster.id].targetRadius = targetRadius;
         physicsState.current[cluster.id].category = cluster.category;
+        physicsState.current[cluster.id].color = getCategoryColor(cluster.category);
       }
     });
   }, [data]);
 
-  // 3. Physics Render Loop
+  // 3. Physics Render Loop & Interactions
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -123,11 +157,101 @@ export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
     if (!ctx) return;
 
     let animationFrameId: number;
+    let isDragging = false;
+    let lastX = 0;
+    let lastY = 0;
+    let clickStartX = 0;
+    let clickStartY = 0;
 
+    // --- Interaction Handlers ---
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      targetBubbleId.current = null; // Break camera lock
+      if (e.ctrlKey || e.metaKey) {
+        // Pinch to zoom
+        const zoomDelta = e.deltaY * -0.01;
+        camera.current.zoom = Math.min(Math.max(0.1, camera.current.zoom + zoomDelta), 5);
+      } else {
+        // Two-finger scroll to pan
+        camera.current.x += e.deltaX / camera.current.zoom;
+        camera.current.y += e.deltaY / camera.current.zoom;
+      }
+    };
+
+    const handlePointerDown = (e: PointerEvent) => {
+      isDragging = true;
+      targetBubbleId.current = null; // Break camera lock
+      lastX = e.clientX;
+      lastY = e.clientY;
+      clickStartX = e.clientX;
+      clickStartY = e.clientY;
+      canvas.style.cursor = 'grabbing';
+    };
+
+    const handlePointerMove = (e: PointerEvent) => {
+      if (!isDragging) return;
+      const dx = e.clientX - lastX;
+      const dy = e.clientY - lastY;
+      lastX = e.clientX;
+      lastY = e.clientY;
+      // Move camera opposite to drag direction
+      camera.current.x -= dx / camera.current.zoom;
+      camera.current.y -= dy / camera.current.zoom;
+    };
+
+    const handlePointerUp = () => {
+      isDragging = false;
+      canvas.style.cursor = 'grab';
+    };
+
+    const handleClick = (e: MouseEvent) => {
+      // Ignore if it was a drag
+      if (Math.abs(e.clientX - clickStartX) > 5 || Math.abs(e.clientY - clickStartY) > 5) {
+        return;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+
+      // Transform screen coordinates to world coordinates
+      const worldX = (mx - canvas.width / 2) / camera.current.zoom + camera.current.x;
+      const worldY = (my - canvas.height / 2) / camera.current.zoom + camera.current.y;
+
+      const bubbles = Object.values(physicsState.current);
+      for (const b of bubbles) {
+        const dist = Math.sqrt(Math.pow(worldX - b.x, 2) + Math.pow(worldY - b.y, 2));
+        if (dist <= b.radius) {
+          onBubbleClick(b.id);
+          break;
+        }
+      }
+    };
+
+    canvas.addEventListener('wheel', handleWheel, { passive: false });
+    canvas.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+    canvas.addEventListener('click', handleClick);
+
+    // --- Render Loop ---
     const render = (time: number) => {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const cx = canvas.width / 2;
-      const cy = canvas.height / 2;
+      
+      // Smooth camera pan to target
+      if (targetBubbleId.current && physicsState.current[targetBubbleId.current]) {
+        const targetB = physicsState.current[targetBubbleId.current];
+        camera.current.x += (targetB.x - camera.current.x) * 0.05;
+        camera.current.y += (targetB.y - camera.current.y) * 0.05;
+      }
+
+      ctx.save();
+      // Move to center of screen
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      // Apply zoom
+      ctx.scale(camera.current.zoom, camera.current.zoom);
+      // Apply pan offset
+      ctx.translate(-camera.current.x, -camera.current.y);
 
       const bubbles = Object.values(physicsState.current);
 
@@ -137,9 +261,10 @@ export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
         // Smoothly animate radius growing/shrinking
         b.radius += (b.targetRadius - b.radius) * 0.05;
 
-        // Gravity to center
-        const dx = cx - b.x;
-        const dy = cy - b.y;
+        // Gravity to Category-Specific Orbit Node
+        const gravity = getCategoryGravity(b.category);
+        const dx = gravity.x - b.x;
+        const dy = gravity.y - b.y;
         b.vx += dx * 0.00005;
         b.vy += dy * 0.00005;
 
@@ -194,28 +319,18 @@ export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
         ctx.fillText(`${b.totalWeight} votes`, b.x, b.y + 14);
       }
 
+      ctx.restore();
+
       animationFrameId = requestAnimationFrame(render);
     };
 
     animationFrameId = requestAnimationFrame(render);
 
-    const handleClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-
-      const bubbles = Object.values(physicsState.current);
-      for (const b of bubbles) {
-        const dist = Math.sqrt(Math.pow(mx - b.x, 2) + Math.pow(my - b.y, 2));
-        if (dist <= b.radius) {
-          onBubbleClick(b.id);
-          break;
-        }
-      }
-    };
-    canvas.addEventListener('click', handleClick);
-
     return () => {
+      canvas.removeEventListener('wheel', handleWheel);
+      canvas.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
       canvas.removeEventListener('click', handleClick);
       cancelAnimationFrame(animationFrameId);
     };
@@ -224,7 +339,7 @@ export default function BubbleCanvas({ onBubbleClick }: BubbleCanvasProps) {
   return (
     <canvas 
       ref={canvasRef} 
-      style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1, cursor: 'pointer' }}
+      style={{ position: 'fixed', top: 0, left: 0, width: '100vw', height: '100vh', zIndex: 1, cursor: 'grab' }}
     />
   );
 }

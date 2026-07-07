@@ -194,8 +194,24 @@ body {
   to { transform: rotate(360deg); }
 }
 
+.canvas-hint {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 10;
+  color: var(--foreground);
+}
+
 /* Mobile Responsiveness */
 @media (max-width: 768px) {
+  .canvas-hint {
+    display: none;
+  }
+  
   .trending-rail {
     width: calc(100% - 40px);
     bottom: 120px;
