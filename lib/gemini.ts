@@ -10,7 +10,7 @@ export async function getEmbedding(text: string): Promise<number[]> {
 
 export async function checkModeration(text: string): Promise<{ isSafe: boolean, reason?: string, category?: string }> {
   const model = genAI.getGenerativeModel({ 
-    model: "gemini-3.8-flash",
+    model: "gemini-3.5-flash-lite",
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: {
