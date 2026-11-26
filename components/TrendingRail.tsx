@@ -313,7 +313,7 @@ export default function TrendingRail({
                 >
                   <span>
                     {cluster.totalWeight} votes
-                    {cluster.submissionCount > 1 ? ` • ${cluster.submissionCount} reports` : ''}
+                    {(cluster.submissionCount ?? 0) > 1 ? ` • ${cluster.submissionCount} reports` : ''}
                   </span>
                   {isClusterClaimed(cluster) && (
                     <span style={{ color: '#10B981', fontWeight: 700 }}>Claimed ✓</span>
