@@ -73,7 +73,7 @@ function drawAmoeba(
   pinch?: PinchDeform
 ) {
   const isPinching = Boolean(pinch && Math.abs(pinch.e) > 0.005);
-  const points = isPinching ? 56 : 14;
+  const points = isPinching ? 64 : 36;
   const vertices: { x: number; y: number }[] = [];
 
   for (let i = 0; i < points; i++) {
@@ -92,8 +92,8 @@ function drawAmoeba(
       radius = r * (1 + e * 0.62 * Math.cos(2 * rel) - Math.max(0, e) * 0.55 * s8 + organic);
     } else {
       const noise =
-        Math.sin(angle * 3 + time * 0.0015 + seed) * (r * 0.09) +
-        Math.cos(angle * 2 - time * 0.001 + seed * 2) * (r * 0.055);
+        Math.sin(angle * 3 + time * 0.0015 + seed) * (r * 0.07) +
+        Math.cos(angle * 2 - time * 0.001 + seed * 2) * (r * 0.045);
       radius = r + noise;
     }
 
@@ -117,35 +117,49 @@ function drawAmoeba(
   }
   ctx.closePath();
 
+  // Glassy soap-film body keeping the cluster's category color
   ctx.save();
   if (highlighted) {
     ctx.shadowColor = color;
-    ctx.shadowBlur = 22;
+    ctx.shadowBlur = 24;
   }
-  const grad = ctx.createRadialGradient(x - r * 0.25, y - r * 0.3, r * 0.08, x, y, r * 1.15);
-  grad.addColorStop(0, highlighted ? `${color}99` : `${color}78`);
-  grad.addColorStop(0.72, highlighted ? `${color}CC` : `${color}A8`);
-  grad.addColorStop(1, highlighted ? `${color}EE` : `${color}C8`);
+  const grad = ctx.createRadialGradient(x - r * 0.25, y - r * 0.3, r * 0.1, x, y, r * 1.05);
+  grad.addColorStop(0, highlighted ? `${color}28` : `${color}1A`);
+  grad.addColorStop(0.68, highlighted ? `${color}48` : `${color}30`);
+  grad.addColorStop(0.92, highlighted ? `${color}88` : `${color}5E`);
+  grad.addColorStop(1, highlighted ? `${color}B8` : `${color}84`);
   ctx.fillStyle = grad;
   ctx.fill();
   ctx.restore();
 
-  ctx.lineWidth = highlighted ? 2.6 : isClaimed ? 3.2 : 1.8;
+  // Thick inner colored rim + subtle inner white sheen clipped inside the bubble
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = highlighted ? `${color}AA` : `${color}70`;
+  ctx.lineWidth = Math.max(3, r * 0.16);
+  ctx.stroke();
+  ctx.strokeStyle = highlighted ? 'rgba(255, 255, 255, 0.34)' : 'rgba(255, 255, 255, 0.2)';
+  ctx.lineWidth = Math.max(1.5, r * 0.05);
+  ctx.stroke();
+  ctx.restore();
+
+  // Fine outer edge (emerald ring if claimed)
+  ctx.lineWidth = isClaimed ? 3 : highlighted ? 1.8 : 1.2;
   ctx.strokeStyle = isClaimed
     ? CLAIMED_RING_COLOR
     : highlighted
-    ? 'rgba(255, 255, 255, 0.85)'
-    : color;
+      ? 'rgba(255, 255, 255, 0.78)'
+      : `${color}CC`;
   ctx.stroke();
 
-  // Tactile specular soap-bubble sheen highlight
-  if (r > 18) {
+  // Dual soap-bubble specular highlights (upper-left oval sheen + bottom-right dot)
+  if (r > 16) {
     ctx.save();
-    ctx.translate(x - r * 0.34, y - r * 0.38);
-    ctx.rotate(-0.65);
+    ctx.translate(x - r * 0.38, y - r * 0.42);
+    ctx.rotate(-0.7);
     const sheen = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.26);
-    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.48)');
-    sheen.addColorStop(0.5, 'rgba(255, 255, 255, 0.14)');
+    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.75)');
+    sheen.addColorStop(0.4, 'rgba(255, 255, 255, 0.28)');
     sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = sheen;
     ctx.scale(1, 0.55);
@@ -153,6 +167,11 @@ function drawAmoeba(
     ctx.arc(0, 0, r * 0.26, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(x + r * 0.44, y + r * 0.48, Math.max(1.5, r * 0.055), 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
+    ctx.fill();
   }
 
   if (isClaimed) {
@@ -378,7 +397,7 @@ export default function BubbleCanvas({
           setServerNuances(json.nuancesByCluster as Record<string, ProblemItem[]>);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       active = false;
     };
@@ -964,9 +983,9 @@ export default function BubbleCanvas({
         const b = bubbles[i];
         const isSplitActive = hoveredId === b.id || autoSplitId === b.id;
         const targetSplit = isSplitActive && b.problems.length > 1 ? 1 : 0;
-        // 2-stage mitosis spring: waist pinch (0..0.42) then elastic snap (0.42..1)
-        const stiffness = b.splitProgress < 0.42 ? 0.085 : 0.13;
-        const damping = b.splitProgress < 0.42 ? 0.78 : 0.70;
+        // Slower, smoother 2-stage mitosis spring: waist pinch (0..0.42) then elastic snap (0.42..1)
+        const stiffness = b.splitProgress < 0.42 ? 0.032 : 0.055;
+        const damping = b.splitProgress < 0.42 ? 0.84 : 0.78;
         const springForce = (targetSplit - b.splitProgress) * stiffness;
         b.splitVel = (b.splitVel + springForce) * damping;
         b.splitProgress = Math.max(0, b.splitProgress + b.splitVel);
@@ -1228,7 +1247,7 @@ export default function BubbleCanvas({
         drop.vy = drop.vy * 0.96 + 0.05;
         drop.x += drop.vx;
         drop.y += drop.vy;
-        drop.life -= 0.032;
+        drop.life -= 0.018;
         if (drop.life <= 0) {
           droplets.splice(d, 1);
           continue;
