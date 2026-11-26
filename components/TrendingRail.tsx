@@ -135,6 +135,7 @@ export default function TrendingRail({
           justifyContent: 'space-between',
           alignItems: 'center',
           marginBottom: '12px',
+          flexShrink: 0,
         }}
       >
         <h3 style={{ margin: 0 }}>Trending Problems</h3>
@@ -167,6 +168,7 @@ export default function TrendingRail({
           outline: 'none',
           color: 'var(--foreground)',
           fontSize: '0.88rem',
+          flexShrink: 0,
         }}
       />
 
@@ -177,6 +179,7 @@ export default function TrendingRail({
           flexWrap: 'wrap',
           gap: '6px',
           marginBottom: '10px',
+          flexShrink: 0,
         }}
       >
         {SORT_OPTIONS.map((opt) => {
@@ -222,13 +225,17 @@ export default function TrendingRail({
       {/* Category filter chips */}
       {categories.length > 0 && (
         <div
+          className="no-scrollbar"
           style={{
             display: 'flex',
+            alignItems: 'center',
             gap: '6px',
             overflowX: 'auto',
-            paddingBottom: '8px',
-            marginBottom: '10px',
-            scrollbarWidth: 'none',
+            paddingTop: '2px',
+            paddingBottom: '10px',
+            marginBottom: '6px',
+            borderBottom: '1px solid var(--bubble-border)',
+            flexShrink: 0,
           }}
         >
           <button
@@ -274,56 +281,58 @@ export default function TrendingRail({
         </div>
       )}
 
-      {sortedClusters.length === 0 ? (
-        <div style={{ fontSize: '0.85rem', opacity: 0.65, padding: '12px 4px' }}>
-          No matching problems found.
-        </div>
-      ) : (
-        Object.entries(grouped).map(([category, clusters]) => (
-          <div key={category} style={{ marginBottom: '16px' }}>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                textTransform: 'uppercase',
-                letterSpacing: '1px',
-                opacity: 0.6,
-                marginBottom: '8px',
-                marginLeft: '4px',
-                fontWeight: 600,
-              }}
-            >
-              {category}
-            </div>
-            {clusters.map((cluster) => (
-              <div
-                key={cluster.id}
-                className="trending-item"
-                onClick={() => onBubbleClick(cluster.id)}
-              >
-                <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{cluster.title}</div>
-                <div
-                  style={{
-                    fontSize: '0.8rem',
-                    opacity: 0.78,
-                    marginTop: '4px',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                  }}
-                >
-                  <span>
-                    {cluster.totalWeight} votes
-                    {(cluster.submissionCount ?? 0) > 1 ? ` • ${cluster.submissionCount} reports` : ''}
-                  </span>
-                  {isClusterClaimed(cluster) && (
-                    <span style={{ color: '#10B981', fontWeight: 700 }}>Claimed ✓</span>
-                  )}
-                </div>
-              </div>
-            ))}
+      <div className="trending-rail-scroll no-scrollbar" style={{ paddingTop: '6px' }}>
+        {sortedClusters.length === 0 ? (
+          <div style={{ fontSize: '0.85rem', opacity: 0.65, padding: '12px 4px' }}>
+            No matching problems found.
           </div>
-        ))
-      )}
+        ) : (
+          Object.entries(grouped).map(([category, clusters]) => (
+            <div key={category} style={{ marginBottom: '16px' }}>
+              <div
+                style={{
+                  fontSize: '0.75rem',
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  opacity: 0.6,
+                  marginBottom: '8px',
+                  marginLeft: '4px',
+                  fontWeight: 600,
+                }}
+              >
+                {category}
+              </div>
+              {clusters.map((cluster) => (
+                <div
+                  key={cluster.id}
+                  className="trending-item"
+                  onClick={() => onBubbleClick(cluster.id)}
+                >
+                  <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>{cluster.title}</div>
+                  <div
+                    style={{
+                      fontSize: '0.8rem',
+                      opacity: 0.78,
+                      marginTop: '4px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span>
+                      {cluster.totalWeight} {cluster.totalWeight === 1 ? 'vote' : 'votes'}
+                      {(cluster.submissionCount ?? 0) > 1 ? ` • ${cluster.submissionCount} reports` : ''}
+                    </span>
+                    {isClusterClaimed(cluster) && (
+                      <span style={{ color: '#10B981', fontWeight: 700 }}>Claimed ✓</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

@@ -63,7 +63,25 @@ body {
   display: flex;
   flex-direction: column;
   padding: 16px;
+  overflow: hidden;
+}
+
+.trending-rail-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.trending-rail-scroll::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .trending-item {
