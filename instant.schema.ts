@@ -12,7 +12,6 @@ export const schema = i.schema({
       updatedAt: i.number(),
       velocity: i.number(),        
       claimedByName: i.string().optional(),
-      claimedByEmail: i.string().optional(),
       claimedByLink: i.string().optional(),
       claimedMessage: i.string().optional(),
       claimedAt: i.number().optional(),

@@ -1,111 +1,226 @@
 import { NextResponse } from 'next/server';
-import { getAdminDb } from '@/lib/admin';
-import { getEmbedding, checkModeration, cosineSimilarity } from '@/lib/gemini';
-import { checkRateLimit } from '@/lib/redis';
 import { id } from '@instantdb/admin';
+import { getAdminDb } from '@/lib/admin';
+import {
+  getEmbedding,
+  checkModeration,
+  cosineSimilarity,
+  computeUpdatedCentroid,
+  normalizeVector,
+  ModerationServiceError,
+} from '@/lib/gemini';
+import { checkSubmissionRateLimit } from '@/lib/redis';
+import {
+  attachDeviceCookie,
+  getClientIp,
+  getDeviceFingerprint,
+  getOrCreateDeviceId,
+  getSubnet24,
+  isTurnstileEnabled,
+  sanitizeCategory,
+  sanitizeText,
+  signBorderlineToken,
+  signUndoToken,
+  verifyTurnstile,
+} from '@/lib/security';
+
+const THRESHOLD_MERGE = 0.82;
+const THRESHOLD_BORDERLINE = 0.70;
 
 export async function POST(req: Request) {
+  const { deviceId, cookieHeader } = getOrCreateDeviceId(req);
+  const ip = getClientIp(req);
+  const subnet = getSubnet24(ip);
+  const fingerprint = getDeviceFingerprint(req);
+
+  const respond = <T>(body: T, status = 200) =>
+    attachDeviceCookie(NextResponse.json(body, { status }), cookieHeader);
+
   try {
-    const ip = req.headers.get('x-forwarded-for') || 'unknown';
-    const isAllowed = await checkRateLimit(ip);
-    if (!isAllowed) {
-      return NextResponse.json({ error: 'Rate limit exceeded' }, { status: 429 });
+    const rateLimit = await checkSubmissionRateLimit({ ip, subnet, deviceId, fingerprint });
+    if (!rateLimit.allowed) {
+      return respond({ error: 'Rate limit exceeded. Please try again later.' }, 429);
     }
 
-    const { text, userCategory } = await req.json();
-    if (!text || typeof text !== 'string') {
-      return NextResponse.json({ error: 'Invalid text' }, { status: 400 });
+    let body: Record<string, unknown>;
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return respond({ error: 'Invalid JSON request body' }, 400);
     }
 
-    const modResult = await checkModeration(text);
+    if (isTurnstileEnabled() && (rateLimit.suspicious || body.turnstileToken)) {
+      const captcha = await verifyTurnstile(body.turnstileToken, ip);
+      if (!captcha.ok) {
+        return respond({ error: captcha.error || 'CAPTCHA verification failed' }, 403);
+      }
+    }
+
+    const textCheck = sanitizeText(body.text, 5, 500, 'Problem description');
+    if (!textCheck.ok) {
+      return respond({ error: textCheck.error }, 400);
+    }
+    const text = textCheck.value;
+    const cleanUserCategory = sanitizeCategory(body.userCategory);
+
+    let modResult: { isSafe: boolean; reason?: string; category?: string };
+    try {
+      modResult = await checkModeration(text);
+    } catch (err) {
+      if (err instanceof ModerationServiceError) {
+        return respond(
+          { error: 'Moderation service is temporarily unavailable. Please try again.' },
+          503
+        );
+      }
+      throw err;
+    }
+
     if (!modResult.isSafe) {
-      return NextResponse.json({ error: modResult.reason || "Content violates community guidelines." }, { status: 400 });
+      return respond(
+        { error: modResult.reason || 'Content violates community guidelines.' },
+        400
+      );
     }
 
-    const finalCategory = userCategory || modResult.category;
-    
-    if (!userCategory && finalCategory === 'Unknown') {
-      return NextResponse.json({ status: 'needs_category' });
+    const finalCategory = cleanUserCategory || sanitizeCategory(modResult.category);
+    if (!cleanUserCategory && !finalCategory) {
+      return respond({ status: 'needs_category' });
     }
 
-    const embedding = await getEmbedding(text);
+    let embedding: number[];
+    try {
+      embedding = await getEmbedding(text);
+    } catch (err) {
+      if (err instanceof ModerationServiceError) {
+        return respond(
+          { error: 'Embedding service is temporarily unavailable. Please try again.' },
+          503
+        );
+      }
+      throw err;
+    }
+
     const db = getAdminDb();
     const queryResult = await db.query({ clusters: {} });
-    const clusters = queryResult.clusters;
+    const clusters = queryResult.clusters || [];
 
-    let bestMatch = null;
+    let bestMatch: (typeof clusters)[number] | null = null;
+    let bestCentroid: number[] | null = null;
     let maxSim = -1;
 
     for (const cluster of clusters) {
       if (!cluster.centroid) continue;
-      const centroid = JSON.parse(cluster.centroid);
-      const sim = cosineSimilarity(embedding, centroid);
-      if (sim > maxSim) {
-        maxSim = sim;
-        bestMatch = cluster;
+      try {
+        const centroid = JSON.parse(cluster.centroid) as number[];
+        const sim = cosineSimilarity(embedding, centroid);
+        if (sim > maxSim) {
+          maxSim = sim;
+          bestMatch = cluster;
+          bestCentroid = centroid;
+        }
+      } catch {
+        continue;
       }
     }
 
-    const THRESHOLD_MERGE = 0.82;
-    const THRESHOLD_BORDERLINE = 0.72;
+    const now = Date.now();
 
-    if (bestMatch && maxSim >= THRESHOLD_MERGE) {
-      const newCount = bestMatch.submissionCount + 1;
-      const oldCentroid = JSON.parse(bestMatch.centroid);
-      const newCentroid = oldCentroid.map((val: number, i: number) => 
-        (val * bestMatch.submissionCount + embedding[i]) / newCount
-      );
-
+    if (bestMatch && bestCentroid && maxSim >= THRESHOLD_MERGE) {
+      const oldCount = bestMatch.submissionCount || 1;
+      const newCount = oldCount + 1;
+      const newCentroid = computeUpdatedCentroid(bestCentroid, oldCount, embedding);
       const problemId = id();
-      
+
       await db.transact([
         db.tx.clusters[bestMatch.id].update({
           submissionCount: newCount,
-          totalWeight: bestMatch.totalWeight + 1,
+          totalWeight: (bestMatch.totalWeight || 0) + 1,
+          velocity: (bestMatch.velocity || 0) + 1,
           centroid: JSON.stringify(newCentroid),
-          updatedAt: Date.now(),
+          updatedAt: now,
         }),
-        db.tx.problems[problemId].update({
-          text,
-          createdAt: Date.now(),
-        }).link({ cluster: bestMatch.id })
+        db.tx.problems[problemId]
+          .update({
+            text,
+            createdAt: now,
+          })
+          .link({ cluster: bestMatch.id }),
       ]);
 
-      return NextResponse.json({ status: 'merged', clusterId: bestMatch.id });
-    } else if (bestMatch && maxSim >= THRESHOLD_BORDERLINE) {
-      return NextResponse.json({ 
-        status: 'borderline', 
-        match: { id: bestMatch.id, title: bestMatch.title, similarity: maxSim },
-        embedding,
-        text
+      const undoToken = signUndoToken({
+        action: 'merged',
+        clusterId: bestMatch.id,
+        problemId,
+        previousCentroid: bestCentroid,
+        previousSubmissionCount: bestMatch.submissionCount,
+        previousTotalWeight: bestMatch.totalWeight,
+        previousUpdatedAt: bestMatch.updatedAt,
       });
-    } else {
-      const clusterId = id();
-      const problemId = id();
 
-      await db.transact([
-        db.tx.clusters[clusterId].update({
-          title: text,
-          submissionCount: 1,
-          plusOneCount: 0,
-          totalWeight: 1,
-          centroid: JSON.stringify(embedding),
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          velocity: 1,
-          category: finalCategory !== 'Unknown' ? finalCategory : undefined
-        }),
-        db.tx.problems[problemId].update({
-          text,
-          createdAt: Date.now(),
-        }).link({ cluster: clusterId })
-      ]);
-
-      return NextResponse.json({ status: 'created', clusterId });
+      return respond({
+        status: 'merged',
+        clusterId: bestMatch.id,
+        matchedTitle: bestMatch.title,
+        similarity: maxSim,
+        undoToken,
+      });
     }
 
-  } catch (error: any) {
-    console.error("Submit error:", error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    if (bestMatch && maxSim >= THRESHOLD_BORDERLINE) {
+      const borderlineToken = signBorderlineToken({
+        text,
+        embedding: normalizeVector(embedding),
+        category: finalCategory,
+        matchId: bestMatch.id,
+      });
+
+      return respond({
+        status: 'borderline',
+        match: {
+          id: bestMatch.id,
+          title: bestMatch.title,
+          similarity: maxSim,
+          category: bestMatch.category,
+        },
+        text,
+        borderlineToken,
+      });
+    }
+
+    const clusterId = id();
+    const problemId = id();
+    const normalizedEmbedding = normalizeVector(embedding);
+
+    await db.transact([
+      db.tx.clusters[clusterId].update({
+        title: text,
+        submissionCount: 1,
+        plusOneCount: 0,
+        totalWeight: 1,
+        centroid: JSON.stringify(normalizedEmbedding),
+        createdAt: now,
+        updatedAt: now,
+        velocity: 1,
+        category: finalCategory,
+      }),
+      db.tx.problems[problemId]
+        .update({
+          text,
+          createdAt: now,
+        })
+        .link({ cluster: clusterId }),
+    ]);
+
+    const undoToken = signUndoToken({
+      action: 'created',
+      clusterId,
+      problemId,
+    });
+
+    return respond({ status: 'created', clusterId, undoToken });
+  } catch (error) {
+    console.error('Submit error:', error);
+    return respond({ error: 'Internal server error' }, 500);
   }
 }
