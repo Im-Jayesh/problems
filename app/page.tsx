@@ -46,6 +46,11 @@ export default function Home() {
   const [selectedProblemText, setSelectedProblemText] = useState<string | null>(null);
   const [focusBubbleId, setFocusBubbleId] = useState<string | null>(null);
   const [glowBubbleId, setGlowBubbleId] = useState<string | null>(null);
+  const [mergeHighlight, setMergeHighlight] = useState<{
+    clusterId: string;
+    text?: string;
+    seq: number;
+  } | null>(null);
 
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,12 +67,18 @@ export default function Home() {
     setSelectedProblemText(null);
   };
 
-  const handleMerged = (id: string) => {
+  const handleMerged = (id: string, mergedText?: string) => {
     setFocusBubbleId(id);
     setGlowBubbleId(id);
+    setMergeHighlight((prev) => ({
+      clusterId: id,
+      text: mergedText,
+      seq: (prev?.seq || 0) + 1,
+    }));
     setTimeout(() => {
       setGlowBubbleId(null);
-    }, 4000);
+      setMergeHighlight((prev) => (prev?.clusterId === id ? null : prev));
+    }, 4500);
   };
 
   const toggleTheme = () => {
@@ -192,6 +203,7 @@ export default function Home() {
             onBubbleClick={handleCanvasBubbleClick}
             focusBubbleId={focusBubbleId}
             glowBubbleId={glowBubbleId}
+            mergeHighlight={mergeHighlight}
             activeCategory={activeCategory}
             searchQuery={searchQuery}
             showClaimedOnly={showClaimedOnly}

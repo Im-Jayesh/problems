@@ -7,6 +7,7 @@ type BubbleCanvasProps = {
   onBubbleClick: (id: string, problemText?: string) => void;
   focusBubbleId?: string | null;
   glowBubbleId?: string | null;
+  mergeHighlight?: { clusterId: string; text?: string; seq: number } | null;
   activeCategory?: string | null;
   searchQuery?: string;
   showClaimedOnly?: boolean;
@@ -166,7 +167,11 @@ type BubbleNode = {
   seed: number;
 };
 
-function dedupeProblems(title: string, rawProblems?: ProblemItem[]): {
+function dedupeProblems(
+  title: string,
+  rawProblems?: ProblemItem[],
+  optimisticProblems?: ProblemItem[]
+): {
   visible: ProblemItem[];
   hiddenCount: number;
 } {
@@ -183,11 +188,20 @@ function dedupeProblems(title: string, rawProblems?: ProblemItem[]): {
   // Ensure the primary cluster title appears first
   pushIfUnique({ id: 'primary', text: title });
 
-  const sorted = [...(rawProblems || [])].sort(
+  const combined = [...(optimisticProblems || []), ...(rawProblems || [])].sort(
     (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
   );
-  for (const p of sorted) {
+  for (const p of combined) {
     pushIfUnique(p);
+  }
+
+  // If multiple submissions exist with identical text (e.g. direct re-submit), still allow splitting
+  if (unique.length === 1 && combined.length > 1) {
+    const fallback = [{ id: 'primary', text: title }, ...combined.slice(0, MAX_SUB_BUBBLES - 1)];
+    return {
+      visible: fallback.slice(0, MAX_SUB_BUBBLES),
+      hiddenCount: Math.max(0, combined.length + 1 - MAX_SUB_BUBBLES),
+    };
   }
 
   if (unique.length <= MAX_SUB_BUBBLES) {
@@ -293,6 +307,7 @@ export default function BubbleCanvas({
   onBubbleClick,
   focusBubbleId,
   glowBubbleId,
+  mergeHighlight = null,
   activeCategory = null,
   searchQuery = '',
   showClaimedOnly = false,
@@ -310,6 +325,8 @@ export default function BubbleCanvas({
   const hoveredClusterIdRef = useRef<string | null>(null);
   const pointerClientRef = useRef<{ x: number; y: number } | null>(null);
   const lastPointerTypeRef = useRef<string>('mouse');
+  const optimisticProblemsRef = useRef<Map<string, ProblemItem[]>>(new Map());
+  const autoSplitUntilRef = useRef<{ clusterId: string; until: number } | null>(null);
 
   // Keep latest reactive props in refs so the rAF loop never uses stale closures
   const glowBubbleIdRef = useRef<string | null | undefined>(glowBubbleId);
@@ -346,6 +363,28 @@ export default function BubbleCanvas({
   useEffect(() => {
     if (focusBubbleId) targetBubbleId.current = focusBubbleId;
   }, [focusBubbleId]);
+
+  useEffect(() => {
+    if (!mergeHighlight) return;
+    const { clusterId, text, seq } = mergeHighlight;
+    autoSplitUntilRef.current = { clusterId, until: Date.now() + 4500 };
+
+    if (text && text.trim()) {
+      const existing = optimisticProblemsRef.current.get(clusterId) || [];
+      const next = [
+        { id: `optimistic-${seq}`, text: text.trim(), createdAt: Date.now() },
+        ...existing,
+      ].slice(0, MAX_SUB_BUBBLES);
+      optimisticProblemsRef.current.set(clusterId, next);
+
+      const node = physicsState.current[clusterId];
+      if (node) {
+        const { visible, hiddenCount } = dedupeProblems(node.title, node.problems, next);
+        node.problems = visible;
+        node.hiddenProblemCount = hiddenCount;
+      }
+    }
+  }, [mergeHighlight]);
 
   // 1. Handle HiDPI Canvas Resize & Resolved Font
   useEffect(() => {
@@ -397,7 +436,12 @@ export default function BubbleCanvas({
       const gravity =
         (cluster.category && gravityMap.get(cluster.category)) || { x: 0, y: 0 };
 
-      const { visible, hiddenCount } = dedupeProblems(cluster.title, cluster.problems);
+      const optimistic = optimisticProblemsRef.current.get(cluster.id);
+      const { visible, hiddenCount } = dedupeProblems(
+        cluster.title,
+        cluster.problems,
+        optimistic
+      );
 
       if (!physicsState.current[cluster.id]) {
         physicsState.current[cluster.id] = {
@@ -505,13 +549,20 @@ export default function BubbleCanvas({
       }
     };
 
+    const isOverUiOverlay = (clientX: number, clientY: number) => {
+      const el = document.elementFromPoint(clientX, clientY);
+      return Boolean(
+        el?.closest('.trending-rail, .problem-input-container, .modal-overlay, .presence-bar')
+      );
+    };
+
     const handlePointerMove = (e: PointerEvent) => {
       lastPointerTypeRef.current = e.pointerType || 'mouse';
       if (e.pointerType !== 'touch') {
         if (e.buttons === 0 && activePointers.size > 0) {
           activePointers.clear();
         }
-        if (e.target === canvas) {
+        if (!isOverUiOverlay(e.clientX, e.clientY)) {
           pointerClientRef.current = { x: e.clientX, y: e.clientY };
         } else if (activePointers.size === 0) {
           pointerClientRef.current = null;
@@ -541,6 +592,19 @@ export default function BubbleCanvas({
           prevPinchDist = metrics.dist;
           prevPinchMid = metrics.mid;
         }
+      }
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (lastPointerTypeRef.current === 'touch') return;
+      if (e.buttons === 0 && activePointers.size > 0) {
+        activePointers.clear();
+      }
+      if (!isOverUiOverlay(e.clientX, e.clientY)) {
+        pointerClientRef.current = { x: e.clientX, y: e.clientY };
+      } else if (activePointers.size === 0) {
+        pointerClientRef.current = null;
+        hoveredClusterIdRef.current = null;
       }
     };
 
@@ -629,6 +693,7 @@ export default function BubbleCanvas({
     canvas.addEventListener('pointerdown', handlePointerDown);
     canvas.addEventListener('pointerleave', handlePointerLeave);
     window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('pointerup', handlePointerUp);
     window.addEventListener('pointercancel', handlePointerUp);
     canvas.addEventListener('click', handleClick);
@@ -798,9 +863,20 @@ export default function BubbleCanvas({
       // Advance split/merge animations and find max active split for background dimming
       let maxSplit = 0;
       const hoveredId = hoveredClusterIdRef.current;
+      const nowMs = Date.now();
+      const autoSplit = autoSplitUntilRef.current;
+      const autoSplitId =
+        autoSplit && nowMs < autoSplit.until && (!hoveredId || hoveredId === autoSplit.clusterId)
+          ? autoSplit.clusterId
+          : null;
+      if (autoSplit && nowMs >= autoSplit.until) {
+        autoSplitUntilRef.current = null;
+      }
+
       for (let i = 0; i < bubbles.length; i++) {
         const b = bubbles[i];
-        const targetSplit = hoveredId === b.id && b.problems.length > 1 ? 1 : 0;
+        const isSplitActive = hoveredId === b.id || autoSplitId === b.id;
+        const targetSplit = isSplitActive && b.problems.length > 1 ? 1 : 0;
         b.splitProgress += (targetSplit - b.splitProgress) * 0.16;
         if (b.splitProgress < 0.004 && targetSplit === 0) b.splitProgress = 0;
         if (b.splitProgress > 0.996 && targetSplit === 1) b.splitProgress = 1;
@@ -1000,6 +1076,7 @@ export default function BubbleCanvas({
       canvas.removeEventListener('pointerdown', handlePointerDown);
       canvas.removeEventListener('pointerleave', handlePointerLeave);
       window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
       canvas.removeEventListener('click', handleClick);

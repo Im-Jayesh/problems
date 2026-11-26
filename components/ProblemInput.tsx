@@ -27,7 +27,11 @@ declare global {
 
 const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
-export default function ProblemInput({ onMerged }: { onMerged?: (id: string) => void }) {
+export default function ProblemInput({
+  onMerged,
+}: {
+  onMerged?: (id: string, mergedText?: string) => void;
+}) {
   const [text, setText] = useState('');
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
@@ -177,7 +181,7 @@ export default function ProblemInput({ onMerged }: { onMerged?: (id: string) => 
       } else if (data.status === 'merged') {
         showUndoToast('Merged with a similar problem!', data.undoToken, data.clusterId);
         localStorage.setItem(`plus_one_${data.clusterId}`, 'true');
-        if (onMerged) onMerged(data.clusterId);
+        if (onMerged) onMerged(data.clusterId, text.trim());
         setText('');
         setNeedsCategory(false);
         setUserCategory('');
@@ -222,7 +226,7 @@ export default function ProblemInput({ onMerged }: { onMerged?: (id: string) => 
       }
       const targetId = data.clusterId || borderlineMatch.match.id;
       localStorage.setItem(`plus_one_${targetId}`, 'true');
-      if (onMerged) onMerged(targetId);
+      if (onMerged) onMerged(targetId, (borderlineMatch.text || text).trim());
       showUndoToast('Bubbles merged successfully!', data.undoToken, targetId);
       setBorderlineMatch(null);
       setText('');
