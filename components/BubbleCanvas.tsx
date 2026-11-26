@@ -42,7 +42,7 @@ function computeCategoryGravityMap(categories: string[]): Map<string, { x: numbe
   const goldenAngle = 2.399963229728653;
   unique.forEach((cat, idx) => {
     const angle = idx * goldenAngle;
-    const distance = 680 + Math.sqrt(idx + 1) * 360;
+    const distance = 220 + Math.sqrt(idx + 1) * 145;
     map.set(cat, {
       x: Math.cos(angle) * distance,
       y: Math.sin(angle) * distance,
@@ -490,8 +490,15 @@ export default function BubbleCanvas({
                 ny = disty / dist;
               }
 
-              // Extra gap accounts for ±18% amoeba wobble
-              const minDist = (b.radius + b2.radius) * 1.18 + 18;
+              const sameCategory =
+                Boolean(b.category && b2.category) &&
+                b.category !== 'Unknown' &&
+                b.category?.toLowerCase() === b2.category?.toLowerCase();
+
+              // Extra gap accounts for ±18% amoeba wobble, with wider separation between different groups
+              const minDist = sameCategory
+                ? (b.radius + b2.radius) * 1.15 + 14
+                : (b.radius + b2.radius) * 1.18 + 52;
 
               if (dist < minDist) {
                 const force = (minDist - dist) * 0.025;
@@ -499,13 +506,7 @@ export default function BubbleCanvas({
                 b.vy -= ny * force;
                 b2.vx += nx * force;
                 b2.vy += ny * force;
-              } else if (
-                b.category &&
-                b2.category &&
-                b.category !== 'Unknown' &&
-                b.category.toLowerCase() === b2.category.toLowerCase() &&
-                dist < minDist + 260
-              ) {
+              } else if (sameCategory && dist < minDist + 220) {
                 const force = 0.002;
                 b.vx += nx * force;
                 b.vy += ny * force;
