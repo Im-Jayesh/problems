@@ -133,6 +133,27 @@ export default function ClaimModal({
 
   const weight = cluster.totalWeight ?? 0;
   const reports = cluster.submissionCount ?? 1;
+  const activeProblem = highlightProblemText?.trim() || cluster.title;
+  const isSubProblemView =
+    Boolean(highlightProblemText?.trim()) &&
+    highlightProblemText!.trim().toLowerCase() !== cluster.title.trim().toLowerCase();
+
+  const relatedNuances = (() => {
+    const seen = new Set<string>([activeProblem.trim().toLowerCase()]);
+    const list: { id: string; text: string; isPrimary?: boolean }[] = [];
+    const titleKey = cluster.title.trim().toLowerCase();
+    if (!seen.has(titleKey)) {
+      seen.add(titleKey);
+      list.push({ id: 'primary', text: cluster.title, isPrimary: true });
+    }
+    for (const p of (cluster.problems || []) as ProblemRecord[]) {
+      const k = p.text.trim().toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      list.push({ id: p.id, text: p.text });
+    }
+    return list;
+  })();
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -204,8 +225,24 @@ export default function ClaimModal({
             letterSpacing: '-0.015em',
           }}
         >
-          {cluster.title}
+          {activeProblem}
         </h2>
+
+        {isSubProblemView && (
+          <div
+            style={{
+              fontSize: '0.8rem',
+              opacity: 0.72,
+              marginBottom: '10px',
+              padding: '6px 10px',
+              borderRadius: '8px',
+              background: 'var(--chip-bg)',
+              border: '1px solid var(--bubble-border)',
+            }}
+          >
+            Merged into cluster: <strong>&ldquo;{cluster.title}&rdquo;</strong>
+          </div>
+        )}
 
         <div
           style={{
@@ -228,7 +265,7 @@ export default function ClaimModal({
           )}
         </div>
 
-        {cluster.problems && cluster.problems.length > 1 && (
+        {relatedNuances.length > 0 && (
           <div
             className="no-scrollbar"
             style={{
@@ -236,7 +273,7 @@ export default function ClaimModal({
               border: '1px solid var(--bubble-border)',
               padding: '12px',
               borderRadius: '12px',
-              maxHeight: '120px',
+              maxHeight: '130px',
               overflowY: 'auto',
               marginBottom: '18px',
               fontSize: '0.84rem',
@@ -246,30 +283,27 @@ export default function ClaimModal({
             }}
           >
             <div style={{ fontWeight: 600, fontSize: '0.75rem', opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Related reports
+              Other nuances in this bubble
             </div>
-            {(cluster.problems as ProblemRecord[])
-              .filter((p) => p.text !== cluster.title)
-              .map((p) => {
-                const isSelected =
-                  Boolean(highlightProblemText) &&
-                  p.text.trim().toLowerCase() === highlightProblemText!.trim().toLowerCase();
-                return (
-                  <div
-                    key={p.id}
-                    style={{
-                      padding: '6px 10px',
-                      background: isSelected ? 'rgba(195, 125, 146, 0.14)' : 'var(--surface)',
-                      borderRadius: '8px',
-                      borderLeft: `${isSelected ? '3px' : '2px'} solid var(--accent)`,
-                      fontWeight: isSelected ? 600 : 400,
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    &ldquo;{p.text}&rdquo;
-                  </div>
-                );
-              })}
+            {relatedNuances.map((p) => (
+              <div
+                key={p.id}
+                style={{
+                  padding: '6px 10px',
+                  background: 'var(--surface)',
+                  borderRadius: '8px',
+                  borderLeft: '2px solid var(--accent)',
+                  lineHeight: 1.4,
+                }}
+              >
+                &ldquo;{p.text}&rdquo;
+                {p.isPrimary && (
+                  <span style={{ marginLeft: '6px', fontSize: '0.72rem', opacity: 0.6 }}>
+                    (main)
+                  </span>
+                )}
+              </div>
+            ))}
           </div>
         )}
 
