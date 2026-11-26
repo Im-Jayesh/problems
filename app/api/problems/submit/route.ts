@@ -10,6 +10,7 @@ import {
   ModerationServiceError,
 } from '@/lib/gemini';
 import { checkSubmissionRateLimit } from '@/lib/redis';
+import { appendNuanceList } from '@/lib/nuances';
 import {
   attachDeviceCookie,
   getClientIp,
@@ -147,6 +148,19 @@ export async function POST(req: Request) {
           })
           .link({ cluster: bestMatch.id }),
       ]);
+
+      try {
+        const nextNuances = appendNuanceList(
+          (bestMatch as { nuances?: string }).nuances,
+          bestMatch.title,
+          text
+        );
+        await db.transact([
+          db.tx.clusters[bestMatch.id].update({ nuances: nextNuances }),
+        ]);
+      } catch {
+        // Non-fatal if InstantDB schema is strict
+      }
 
       const undoToken = signUndoToken({
         action: 'merged',

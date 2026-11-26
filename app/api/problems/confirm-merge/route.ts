@@ -3,6 +3,7 @@ import { id } from '@instantdb/admin';
 import { getAdminDb } from '@/lib/admin';
 import { computeUpdatedCentroid } from '@/lib/gemini';
 import { checkActionRateLimit } from '@/lib/redis';
+import { appendNuanceList } from '@/lib/nuances';
 import {
   attachDeviceCookie,
   getClientIp,
@@ -97,6 +98,19 @@ export async function POST(req: Request) {
         })
         .link({ cluster: clusterId }),
     ]);
+
+    try {
+      const nextNuances = appendNuanceList(
+        (cluster as { nuances?: string }).nuances,
+        cluster.title,
+        payload.text
+      );
+      await db.transact([
+        db.tx.clusters[clusterId].update({ nuances: nextNuances }),
+      ]);
+    } catch {
+      // Non-fatal if InstantDB schema is strict
+    }
 
     const undoToken = signUndoToken({
       action: 'merged',

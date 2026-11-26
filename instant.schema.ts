@@ -16,6 +16,7 @@ export const schema = i.schema({
       claimedMessage: i.string().optional(),
       claimedAt: i.number().optional(),
       category: i.string().optional(),
+      nuances: i.string().optional(),
     }),
     problems: i.entity({
       text: i.string(),

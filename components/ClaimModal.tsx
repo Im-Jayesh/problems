@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { db } from '@/lib/db';
 import { toast } from '@/lib/toast';
 import { getApiHeaders } from '@/lib/fingerprint';
+import { parseNuancesField } from '@/lib/nuances';
 
 function isSafeHttpUrl(raw?: string): boolean {
   if (!raw || typeof raw !== 'string') return false;
@@ -145,6 +146,12 @@ export default function ClaimModal({
     if (!seen.has(titleKey)) {
       seen.add(titleKey);
       list.push({ id: 'primary', text: cluster.title, isPrimary: true });
+    }
+    for (const text of parseNuancesField((cluster as { nuances?: string }).nuances)) {
+      const k = text.trim().toLowerCase();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      list.push({ id: `nuance-${list.length}`, text });
     }
     for (const p of (cluster.problems || []) as ProblemRecord[]) {
       const k = p.text.trim().toLowerCase();

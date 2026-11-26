@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { db } from '@/lib/db';
+import { parseNuancesField } from '@/lib/nuances';
 
 type BubbleCanvasProps = {
   onBubbleClick: (id: string, problemText?: string) => void;
@@ -136,13 +137,6 @@ type ProblemItem = {
   createdAt?: number;
 };
 
-type TopLevelProblemRecord = {
-  id: string;
-  text: string;
-  createdAt?: number;
-  cluster?: { id: string } | { id: string }[];
-};
-
 type ClusterRecord = {
   id: string;
   title: string;
@@ -150,6 +144,7 @@ type ClusterRecord = {
   submissionCount?: number;
   category?: string;
   claimedByName?: string;
+  nuances?: string;
   claims?: { id: string }[];
   problems?: ProblemItem[];
 };
@@ -164,6 +159,7 @@ type BubbleNode = {
   problems: ProblemItem[];
   hiddenProblemCount: number;
   splitProgress: number;
+  splitVel: number;
   x: number;
   y: number;
   vx: number;
@@ -310,6 +306,56 @@ function drawWrappedText(
   }
 }
 
+function drawGooeyBridge(
+  ctx: CanvasRenderingContext2D,
+  x1: number,
+  y1: number,
+  r1: number,
+  x2: number,
+  y2: number,
+  r2: number,
+  color: string,
+  pinch: number
+) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 2 || dist > (r1 + r2) * 2.15) return;
+
+  const angle = Math.atan2(dy, dx);
+  const perp = angle + Math.PI / 2;
+
+  const neckHalf = Math.max(2, Math.min(r1, r2) * 0.55 * (1 - pinch));
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+
+  const a1x = x1 + Math.cos(perp) * (r1 * 0.72);
+  const a1y = y1 + Math.sin(perp) * (r1 * 0.72);
+  const a2x = x1 - Math.cos(perp) * (r1 * 0.72);
+  const a2y = y1 - Math.sin(perp) * (r1 * 0.72);
+
+  const b1x = x2 + Math.cos(perp) * (r2 * 0.72);
+  const b1y = y2 + Math.sin(perp) * (r2 * 0.72);
+  const b2x = x2 - Math.cos(perp) * (r2 * 0.72);
+  const b2y = y2 - Math.sin(perp) * (r2 * 0.72);
+
+  const c1x = midX + Math.cos(perp) * neckHalf;
+  const c1y = midY + Math.sin(perp) * neckHalf;
+  const c2x = midX - Math.cos(perp) * neckHalf;
+  const c2y = midY - Math.sin(perp) * neckHalf;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(a1x, a1y);
+  ctx.quadraticCurveTo(c1x, c1y, b1x, b1y);
+  ctx.lineTo(b2x, b2y);
+  ctx.quadraticCurveTo(c2x, c2y, a2x, a2y);
+  ctx.closePath();
+  ctx.fillStyle = `${color}AA`;
+  ctx.fill();
+  ctx.restore();
+}
+
 export default function BubbleCanvas({
   onBubbleClick,
   focusBubbleId,
@@ -321,10 +367,23 @@ export default function BubbleCanvas({
   theme = 'light',
 }: BubbleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { data } = db.useQuery({
-    clusters: { claims: {}, problems: {} },
-    problems: { cluster: {} },
-  });
+  const { data } = db.useQuery({ clusters: { claims: {}, problems: {} } });
+  const [serverNuances, setServerNuances] = useState<Record<string, ProblemItem[]>>({});
+
+  useEffect(() => {
+    let active = true;
+    fetch('/api/problems/nuances', { cache: 'no-store' })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (active && json?.nuancesByCluster) {
+          setServerNuances(json.nuancesByCluster as Record<string, ProblemItem[]>);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [mergeHighlight]);
 
   const physicsState = useRef<Record<string, BubbleNode>>({});
   const categoryGravityRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -427,17 +486,6 @@ export default function BubbleCanvas({
     if (!data?.clusters) return;
 
     const clusters = data.clusters as ClusterRecord[];
-    const problemsByCluster = new Map<string, ProblemItem[]>();
-    const topLevelProblems = (data.problems || []) as TopLevelProblemRecord[];
-    for (const p of topLevelProblems) {
-      const linked = Array.isArray(p.cluster) ? p.cluster : p.cluster ? [p.cluster] : [];
-      for (const c of linked) {
-        if (!c?.id) continue;
-        const list = problemsByCluster.get(c.id) || [];
-        list.push({ id: p.id, text: p.text, createdAt: p.createdAt });
-        problemsByCluster.set(c.id, list);
-      }
-    }
 
     const gravityMap = computeCategoryGravityMap(
       clusters.map((c) => c.category || 'Unknown')
@@ -459,9 +507,14 @@ export default function BubbleCanvas({
         (cluster.category && gravityMap.get(cluster.category)) || { x: 0, y: 0 };
 
       const optimistic = optimisticProblemsRef.current.get(cluster.id);
+      const scalarNuances = parseNuancesField(cluster.nuances).map((text, idx) => ({
+        id: `scalar-${cluster.id}-${idx}`,
+        text,
+      }));
       const mergedRawProblems = [
+        ...scalarNuances,
         ...(cluster.problems || []),
-        ...(problemsByCluster.get(cluster.id) || []),
+        ...(serverNuances[cluster.id] || []),
       ];
       const { visible, hiddenCount } = dedupeProblems(
         cluster.title,
@@ -479,6 +532,7 @@ export default function BubbleCanvas({
           problems: visible,
           hiddenProblemCount: hiddenCount,
           splitProgress: 0,
+          splitVel: 0,
           // Spawn near category gravity node with gentle ±120px jitter
           x: gravity.x + (Math.random() - 0.5) * 240,
           y: gravity.y + (Math.random() - 0.5) * 240,
@@ -503,7 +557,7 @@ export default function BubbleCanvas({
         b.submissionCount = cluster.submissionCount || 1;
       }
     });
-  }, [data]);
+  }, [data, serverNuances]);
 
   // 3. Physics Render Loop & Interactions
   useEffect(() => {
@@ -903,10 +957,15 @@ export default function BubbleCanvas({
         const b = bubbles[i];
         const isSplitActive = hoveredId === b.id || autoSplitId === b.id;
         const targetSplit = isSplitActive && b.problems.length > 1 ? 1 : 0;
-        b.splitProgress += (targetSplit - b.splitProgress) * 0.16;
-        if (b.splitProgress < 0.004 && targetSplit === 0) b.splitProgress = 0;
-        if (b.splitProgress > 0.996 && targetSplit === 1) b.splitProgress = 1;
-        if (b.splitProgress > maxSplit) maxSplit = b.splitProgress;
+        // Damped spring physics for snappy elastic mitosis pop & smooth coalesce
+        const springForce = (targetSplit - b.splitProgress) * 0.14;
+        b.splitVel = (b.splitVel + springForce) * 0.72;
+        b.splitProgress = Math.max(0, b.splitProgress + b.splitVel);
+        if (targetSplit === 0 && b.splitProgress < 0.004 && Math.abs(b.splitVel) < 0.002) {
+          b.splitProgress = 0;
+          b.splitVel = 0;
+        }
+        if (b.splitProgress > maxSplit) maxSplit = Math.min(1, b.splitProgress);
       }
 
       const splitBubbles: BubbleNode[] = [];
@@ -1007,57 +1066,72 @@ export default function BubbleCanvas({
         const b = splitBubbles[sIdx];
         const layout = getSubBubbleOffsets(b);
         const p = b.splitProgress;
+        const pClamped = Math.min(1, Math.max(0, p));
 
         ctx.save();
 
-        // Soft outer halo ring indicating the merged group boundary
+        // Soft radial ambient aura behind the splitting cluster
+        const auraR = Math.max(20, (layout.orbitRadius + layout.subRadius + 32) * pClamped);
+        const aura = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, auraR);
+        aura.addColorStop(0, `${b.color}22`);
+        aura.addColorStop(0.7, `${b.color}10`);
+        aura.addColorStop(1, `${b.color}00`);
+        ctx.fillStyle = aura;
         ctx.beginPath();
-        ctx.arc(b.x, b.y, (layout.orbitRadius + layout.subRadius + 10) * p, 0, Math.PI * 2);
-        ctx.strokeStyle = b.color;
-        ctx.globalAlpha = 0.25 * p;
-        ctx.lineWidth = 2;
-        ctx.setLineDash([6, 6]);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        ctx.arc(b.x, b.y, auraR, 0, Math.PI * 2);
+        ctx.fill();
 
-        // Tether lines from parent center to each sub-bubble
-        ctx.globalAlpha = 0.4 * p;
-        ctx.strokeStyle = b.color;
-        ctx.lineWidth = 2;
-        for (let k = 0; k < layout.items.length; k++) {
-          const item = layout.items[k];
-          if (item.dx === 0 && item.dy === 0) continue;
-          ctx.beginPath();
-          ctx.moveTo(b.x, b.y);
-          ctx.lineTo(b.x + item.dx * p, b.y + item.dy * p);
-          ctx.stroke();
+        // Gooey metaball liquid necks while cells separate or coalesce (0.04 < p < 0.85)
+        if (pClamped > 0.04 && pClamped < 0.85) {
+          const pinch = (pClamped - 0.04) / 0.81;
+          const coreR = Math.max(12, b.radius * (1 - pClamped * 0.65));
+          for (let k = 0; k < layout.items.length; k++) {
+            const item = layout.items[k];
+            if (item.dx === 0 && item.dy === 0) continue;
+            const sx = b.x + item.dx * p;
+            const sy = b.y + item.dy * p;
+            const sr = Math.max(12, b.radius + (layout.subRadius - b.radius) * pClamped);
+            drawGooeyBridge(ctx, b.x, b.y, coreR, sx, sy, sr, b.color, pinch);
+          }
         }
 
-        ctx.globalAlpha = 1;
+        const stretchAmt = Math.min(0.24, Math.abs(b.splitVel) * 1.6);
 
         for (let k = 0; k < layout.items.length; k++) {
           const item = layout.items[k];
           const sx = b.x + item.dx * p;
           const sy = b.y + item.dy * p;
-          const sr = b.radius + (layout.subRadius - b.radius) * p;
+          const sr = Math.max(14, b.radius + (layout.subRadius - b.radius) * pClamped);
           const isSubHovered =
             Boolean(ptr) && Math.hypot(ptr!.x - sx, ptr!.y - sy) <= sr * 1.05;
+
+          const moveAngle = Math.atan2(item.dy, item.dx);
+          const hasRadialMove = item.dx !== 0 || item.dy !== 0;
+
+          ctx.save();
+          if (hasRadialMove && stretchAmt > 0.01) {
+            ctx.translate(sx, sy);
+            ctx.rotate(moveAngle);
+            ctx.scale(1 + stretchAmt, 1 - stretchAmt * 0.45);
+            ctx.translate(-sx, -sy);
+          }
 
           drawAmoeba(
             ctx,
             sx,
             sy,
-            isSubHovered ? sr * 1.06 : sr,
+            isSubHovered ? sr * 1.07 : sr,
             time,
             b.seed + k * 1.7,
             b.color,
             k === 0 && b.hasClaims,
             true
           );
+          ctx.restore();
 
-          if (p > 0.35 && sr * zoom > 16) {
+          if (pClamped > 0.3 && sr * zoom > 16) {
             ctx.save();
-            ctx.globalAlpha = Math.min(1, (p - 0.35) / 0.45);
+            ctx.globalAlpha = Math.min(1, (pClamped - 0.3) / 0.45);
             ctx.fillStyle = isDark ? '#FFF7F9' : '#2E2225';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
