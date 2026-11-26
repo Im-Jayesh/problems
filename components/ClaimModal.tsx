@@ -129,31 +129,106 @@ export default function ClaimModal({
     }
   };
 
+  const weight = cluster.totalWeight ?? 0;
+  const reports = cluster.submissionCount ?? 1;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content fade-in" onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '-12px' }}>
+      <div
+        className="modal-content fade-in"
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          textAlign: 'left',
+          padding: '24px',
+          borderRadius: '20px',
+          maxWidth: '480px',
+          width: '92%',
+        }}
+      >
+        {/* Top bar: Category badge + close */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '14px',
+          }}
+        >
+          <span
+            style={{
+              fontSize: '0.72rem',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              padding: '4px 10px',
+              borderRadius: '999px',
+              background: 'var(--chip-bg)',
+              border: '1px solid var(--bubble-border)',
+              color: 'var(--accent)',
+            }}
+          >
+            {cluster.category || 'General'}
+          </span>
           <button
             type="button"
             onClick={onClose}
             aria-label="Close modal"
             style={{
-              background: 'transparent',
-              border: 'none',
-              fontSize: '1.25rem',
+              width: '32px',
+              height: '32px',
+              borderRadius: '999px',
+              background: 'var(--chip-bg)',
+              border: '1px solid var(--bubble-border)',
+              fontSize: '0.95rem',
               cursor: 'pointer',
               color: 'var(--foreground)',
-              opacity: 0.6,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              opacity: 0.75,
             }}
           >
             ✕
           </button>
         </div>
 
-        <h2>{cluster.title}</h2>
+        {/* Title & stats */}
+        <h2
+          style={{
+            margin: '0 0 8px 0',
+            fontSize: '1.3rem',
+            lineHeight: 1.35,
+            fontWeight: 700,
+            letterSpacing: '-0.015em',
+          }}
+        >
+          {cluster.title}
+        </h2>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            fontSize: '0.88rem',
+            color: 'var(--accent)',
+            fontWeight: 600,
+            marginBottom: '20px',
+          }}
+        >
+          <span>
+            {weight} {weight === 1 ? 'person feels' : 'people feel'} this pain
+          </span>
+          {reports > 1 && (
+            <span style={{ color: 'var(--foreground)', opacity: 0.55, fontWeight: 500 }}>
+              · {reports} reports
+            </span>
+          )}
+        </div>
 
         {cluster.problems && cluster.problems.length > 1 && (
           <div
+            className="no-scrollbar"
             style={{
               background: 'var(--chip-bg)',
               border: '1px solid var(--bubble-border)',
@@ -161,16 +236,15 @@ export default function ClaimModal({
               borderRadius: '12px',
               maxHeight: '120px',
               overflowY: 'auto',
-              margin: '16px 0',
-              fontSize: '0.85rem',
-              textAlign: 'left',
+              marginBottom: '18px',
+              fontSize: '0.84rem',
               display: 'flex',
               flexDirection: 'column',
-              gap: '8px',
+              gap: '6px',
             }}
           >
-            <div style={{ fontWeight: 600, opacity: 0.7, marginBottom: '4px' }}>
-              Also includes:
+            <div style={{ fontWeight: 600, fontSize: '0.75rem', opacity: 0.6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Related reports
             </div>
             {(cluster.problems as ProblemRecord[])
               .filter((p) => p.text !== cluster.title)
@@ -178,9 +252,11 @@ export default function ClaimModal({
                 <div
                   key={p.id}
                   style={{
-                    padding: '8px',
+                    padding: '6px 10px',
                     background: 'var(--surface)',
-                    borderRadius: '6px',
+                    borderRadius: '8px',
+                    borderLeft: '2px solid var(--accent)',
+                    lineHeight: 1.4,
                   }}
                 >
                   &ldquo;{p.text}&rdquo;
@@ -189,30 +265,28 @@ export default function ClaimModal({
           </div>
         )}
 
-        <div
-          style={{
-            margin: '20px 0',
-            fontSize: '1.2rem',
-            color: 'var(--accent)',
-            fontWeight: 600,
-          }}
-        >
-          {cluster.totalWeight} people feel this pain
-        </div>
-
         {cluster.claims && cluster.claims.length > 0 && (
           <div style={{ marginBottom: '20px' }}>
-            <h4 style={{ color: 'var(--accent)', marginTop: 0, textAlign: 'left' }}>
-              Solutions in progress
-            </h4>
             <div
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: '#10B981',
+                marginBottom: '10px',
+              }}
+            >
+              Solutions in progress ({cluster.claims.length})
+            </div>
+            <div
+              className="no-scrollbar"
               style={{
                 display: 'flex',
                 flexDirection: 'column',
-                gap: '12px',
+                gap: '10px',
                 maxHeight: '180px',
                 overflowY: 'auto',
-                paddingRight: '8px',
               }}
             >
               {(cluster.claims as ClaimRecord[]).map((claim) => (
@@ -220,66 +294,105 @@ export default function ClaimModal({
                   key={claim.id}
                   style={{
                     background: 'var(--chip-bg)',
-                    padding: '14px',
+                    padding: '12px 14px',
                     borderRadius: '12px',
-                    textAlign: 'left',
                     border: '1px solid var(--bubble-border)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
                   }}
                 >
-                  <div style={{ fontWeight: 600, color: 'var(--foreground)' }}>
-                    {claim.name}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, fontSize: '0.9rem', color: 'var(--foreground)' }}>
+                      {claim.name}
+                    </span>
+                    {isSafeHttpUrl(claim.link) ? (
+                      <a
+                        href={claim.link}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          color: 'var(--accent)',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          textDecoration: 'none',
+                          padding: '3px 9px',
+                          borderRadius: '999px',
+                          background: 'var(--surface)',
+                          border: '1px solid var(--bubble-border)',
+                        }}
+                      >
+                        Follow ↗
+                      </a>
+                    ) : (
+                      claim.link && (
+                        <span style={{ fontSize: '0.78rem', opacity: 0.65 }}>{claim.link}</span>
+                      )
+                    )}
                   </div>
-                  <p style={{ margin: '8px 0', fontSize: '0.9rem' }}>{claim.message}</p>
-                  {isSafeHttpUrl(claim.link) ? (
-                    <a
-                      href={claim.link}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{
-                        color: 'var(--accent)',
-                        fontSize: '0.9rem',
-                        fontWeight: 600,
-                      }}
-                    >
-                      Follow Progress →
-                    </a>
-                  ) : (
-                    claim.link && (
-                      <span style={{ fontSize: '0.85rem', opacity: 0.7 }}>
-                        {claim.link}
-                      </span>
-                    )
-                  )}
+                  <p style={{ margin: 0, fontSize: '0.86rem', opacity: 0.85, lineHeight: 1.45 }}>
+                    {claim.message}
+                  </p>
                 </div>
               ))}
             </div>
           </div>
         )}
 
+        {/* Primary Vote Action */}
         <button
           type="button"
           disabled={submitting}
           className={`btn ${hasVoted ? '' : 'btn-primary'}`}
           style={{
             width: '100%',
-            padding: '12px',
-            fontSize: '1.05rem',
-            marginBottom: '24px',
+            padding: '12px 16px',
+            borderRadius: '12px',
+            fontSize: '0.98rem',
+            fontWeight: 600,
           }}
           onClick={handleToggleVote}
         >
-          {hasVoted ? '✓ Voted (+1 Me Too) — Click to Undo' : '+1 Me Too'}
+          {hasVoted ? '✓ Voted (+1 Me Too) · Undo' : '+1 Me Too'}
         </button>
 
         {!hasClaimed && (
           <>
-            <div style={{ margin: '0 0 24px 0', opacity: 0.5 }}>--- OR ---</div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                margin: '14px 0',
+                opacity: 0.45,
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                letterSpacing: '0.06em',
+              }}
+            >
+              <div style={{ flex: 1, height: '1px', background: 'var(--bubble-border)' }} />
+              <span>OR</span>
+              <div style={{ flex: 1, height: '1px', background: 'var(--bubble-border)' }} />
+            </div>
 
             {!claiming ? (
               <button
                 type="button"
                 className="btn"
-                style={{ width: '100%' }}
+                style={{
+                  width: '100%',
+                  padding: '11px 16px',
+                  borderRadius: '12px',
+                  fontSize: '0.92rem',
+                  fontWeight: 600,
+                }}
                 onClick={() => setClaiming(true)}
               >
                 I&apos;m building a solution for this
@@ -290,7 +403,7 @@ export default function ClaimModal({
                 style={{
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '12px',
+                  gap: '10px',
                   textAlign: 'left',
                 }}
               >
@@ -298,6 +411,7 @@ export default function ClaimModal({
                   required
                   placeholder="Your Name or Studio"
                   className="problem-input"
+                  style={{ borderRadius: '12px', padding: '11px 14px', fontSize: '0.92rem' }}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   disabled={submitting}
@@ -307,6 +421,7 @@ export default function ClaimModal({
                   placeholder="Link (https://...)"
                   type="url"
                   className="problem-input"
+                  style={{ borderRadius: '12px', padding: '11px 14px', fontSize: '0.92rem' }}
                   value={link}
                   onChange={(e) => setLink(e.target.value)}
                   disabled={submitting}
@@ -315,17 +430,17 @@ export default function ClaimModal({
                   required
                   placeholder="What are you building?"
                   className="problem-input"
-                  style={{ minHeight: '80px', borderRadius: '16px' }}
+                  style={{ minHeight: '80px', borderRadius: '12px', padding: '11px 14px', fontSize: '0.92rem' }}
                   value={msg}
                   onChange={(e) => setMsg(e.target.value)}
                   disabled={submitting}
                 />
-                <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
                   <button
                     type="submit"
                     disabled={submitting}
                     className="btn btn-primary"
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, borderRadius: '12px', padding: '11px 16px' }}
                   >
                     {submitting ? 'Submitting...' : 'Claim Problem'}
                   </button>
@@ -333,6 +448,7 @@ export default function ClaimModal({
                     type="button"
                     disabled={submitting}
                     className="btn"
+                    style={{ borderRadius: '12px', padding: '11px 16px' }}
                     onClick={() => setClaiming(false)}
                   >
                     Cancel

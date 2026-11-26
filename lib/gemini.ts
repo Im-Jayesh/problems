@@ -30,7 +30,7 @@ export async function checkModeration(
   text: string
 ): Promise<{ isSafe: boolean; reason?: string; category?: string }> {
   const genAI = getGenAI();
-  const modelName = process.env.GEMINI_MODERATION_MODEL || 'gemini-2.5-flash-lite';
+  const modelName = process.env.GEMINI_MODERATION_MODEL || 'gemini-3.5-flash-lite';
   const model = genAI.getGenerativeModel({
     model: modelName,
     generationConfig: {
