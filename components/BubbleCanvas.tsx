@@ -136,6 +136,13 @@ type ProblemItem = {
   createdAt?: number;
 };
 
+type TopLevelProblemRecord = {
+  id: string;
+  text: string;
+  createdAt?: number;
+  cluster?: { id: string } | { id: string }[];
+};
+
 type ClusterRecord = {
   id: string;
   title: string;
@@ -314,7 +321,10 @@ export default function BubbleCanvas({
   theme = 'light',
 }: BubbleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { data } = db.useQuery({ clusters: { claims: {}, problems: {} } });
+  const { data } = db.useQuery({
+    clusters: { claims: {}, problems: {} },
+    problems: { cluster: {} },
+  });
 
   const physicsState = useRef<Record<string, BubbleNode>>({});
   const categoryGravityRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -417,6 +427,18 @@ export default function BubbleCanvas({
     if (!data?.clusters) return;
 
     const clusters = data.clusters as ClusterRecord[];
+    const problemsByCluster = new Map<string, ProblemItem[]>();
+    const topLevelProblems = (data.problems || []) as TopLevelProblemRecord[];
+    for (const p of topLevelProblems) {
+      const linked = Array.isArray(p.cluster) ? p.cluster : p.cluster ? [p.cluster] : [];
+      for (const c of linked) {
+        if (!c?.id) continue;
+        const list = problemsByCluster.get(c.id) || [];
+        list.push({ id: p.id, text: p.text, createdAt: p.createdAt });
+        problemsByCluster.set(c.id, list);
+      }
+    }
+
     const gravityMap = computeCategoryGravityMap(
       clusters.map((c) => c.category || 'Unknown')
     );
@@ -437,9 +459,13 @@ export default function BubbleCanvas({
         (cluster.category && gravityMap.get(cluster.category)) || { x: 0, y: 0 };
 
       const optimistic = optimisticProblemsRef.current.get(cluster.id);
+      const mergedRawProblems = [
+        ...(cluster.problems || []),
+        ...(problemsByCluster.get(cluster.id) || []),
+      ];
       const { visible, hiddenCount } = dedupeProblems(
         cluster.title,
-        cluster.problems,
+        mergedRawProblems,
         optimistic
       );
 

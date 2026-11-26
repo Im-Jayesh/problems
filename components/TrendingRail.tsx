@@ -49,7 +49,7 @@ export default function TrendingRail({
   );
   const [sortMode, setSortMode] = useState<SortMode>('top');
 
-  const { data, isLoading } = db.useQuery({ clusters: { claims: {} } });
+  const { data, isLoading } = db.useQuery({ clusters: { claims: {}, problems: {} } });
 
   const categories = useMemo(() => {
     if (!data?.clusters) return [];
