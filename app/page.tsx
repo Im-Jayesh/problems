@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/db';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
+import { Sun, Moon } from 'lucide-react';
 import BubbleCanvas from '@/components/BubbleCanvas';
 import ProblemInput from '@/components/ProblemInput';
 import TrendingRail from '@/components/TrendingRail';
@@ -12,10 +13,16 @@ import ClaimModal from '@/components/ClaimModal';
 import ToastProvider from '@/components/ToastProvider';
 
 export default function Home() {
+  const [mounted, setMounted] = useState(false);
   const [showIntro, setShowIntro] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [focusBubbleId, setFocusBubbleId] = useState<string | null>(null);
   const [glowBubbleId, setGlowBubbleId] = useState<string | null>(null);
+
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showClaimedOnly, setShowClaimedOnly] = useState(false);
 
   const handleTrendingClick = (id: string) => {
     setFocusBubbleId(id);
@@ -30,61 +37,86 @@ export default function Home() {
     }, 4000);
   };
 
-  const startTour = () => {
+  const applyTheme = useCallback((next: 'light' | 'dark') => {
+    setTheme(next);
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('theme', next);
+  }, []);
+
+  const toggleTheme = () => {
+    applyTheme(theme === 'dark' ? 'light' : 'dark');
+  };
+
+  const startTour = useCallback(() => {
     const driverObj = driver({
       showProgress: true,
       animate: true,
-      popoverClass: 'theme-dark',
+      popoverClass: theme === 'dark' ? 'theme-dark' : undefined,
       steps: [
-        { 
-          element: '.problem-input-container', 
-          popover: { 
-            title: '1. Tell us your problems 🤬', 
-            description: 'What annoys you every day? Type your complaint here and hit send! If someone else complained about the exact same thing, our AI will magically merge your text with theirs to make the problem bigger!' 
-          } 
+        {
+          element: '.problem-input-container',
+          popover: {
+            title: '1. Drop a problem',
+            description:
+              'Type anything that bugs you and hit send. Similar problems automatically merge into a bigger bubble, or let you choose if it is borderline.',
+          },
         },
-        { 
-          element: '.trending-rail', 
-          popover: { 
-            title: '2. See what hurts the most 📈', 
-            description: 'This panel ranks the biggest, most painful problems right now. The more votes a problem has, the higher it ranks. Click on any problem in this list to instantly fly your camera over to it.' 
-          } 
+        {
+          element: '.trending-rail',
+          popover: {
+            title: '2. Filter & Rank Pain Points',
+            description:
+              'Sort by Top, Trending, Newest, or Most Reported. Filter by category or Claimed status, and click any item to fly the camera right to it.',
+          },
         },
-        { 
-          element: '.canvas-hint', 
-          popover: { 
-            title: '3. Explore the Universe 🪐', 
-            description: 'You are floating in an infinite space of problems! Click and drag your mouse to pan around. Scroll your mouse wheel (or use two fingers on a trackpad) to zoom in and out. Click on any bubble to read the problem and claim it if you want to build a solution for it!' 
-          } 
+        {
+          element: '.canvas-hint',
+          popover: {
+            title: '3. Explore, +1, or Claim',
+            description:
+              'Drag to pan, scroll or pinch to zoom, and click any bubble to add a +1 Me Too vote or claim it to build a solution!',
+          },
         },
       ],
       onDestroyStarted: () => {
         localStorage.setItem('has_seen_tour', 'true');
         driverObj.destroy();
-      }
+      },
     });
     driverObj.drive();
-  };
+  }, [theme]);
 
-  useEffect(() => {
-    const hasSeenTour = localStorage.getItem('has_seen_tour');
-    if (!hasSeenTour) {
-      setTimeout(startTour, 1000); // Wait for render
-    }
-  }, []);
-
-  // Presence for the "watching now" counter
   const { peers, publishPresence } = db.rooms.usePresence(db.room('lobby'));
-  
+
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const seen = localStorage.getItem('seen_intro');
-      if (!seen) {
-        setShowIntro(true);
-      }
-      publishPresence({ active: true, lastActive: Date.now() });
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme === 'dark' || savedTheme === 'light') {
+      applyTheme(savedTheme);
+    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      applyTheme('dark');
+    } else {
+      applyTheme('light');
     }
-  }, [publishPresence]);
+
+    const seen = localStorage.getItem('seen_intro');
+    if (!seen) {
+      setShowIntro(true);
+    }
+    setMounted(true);
+    publishPresence({ active: true, lastActive: Date.now() });
+  }, [applyTheme, publishPresence]);
+
+  // Only start the tour once Onboarding is closed and board DOM is mounted
+  useEffect(() => {
+    if (!mounted || showIntro) return;
+    const hasSeenTour = localStorage.getItem('has_seen_tour');
+    if (hasSeenTour) return;
+
+    const timer = setTimeout(() => {
+      startTour();
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [mounted, showIntro, startTour]);
 
   const handleFinishIntro = () => {
     localStorage.setItem('seen_intro', 'true');
@@ -95,29 +127,74 @@ export default function Home() {
     <main>
       <ToastProvider />
       {showIntro && <Onboarding onFinish={handleFinishIntro} />}
-      
+
       {!showIntro && (
         <>
-          <div className="presence-counter">
-            <div className="presence-dot"></div>
-            {Object.keys(peers).length + 1} here now
+          <div className="presence-bar">
+            <div className="presence-counter">
+              <div className="presence-dot"></div>
+              {Object.keys(peers).length + 1} here now
+            </div>
+            <button
+              type="button"
+              className="theme-toggle"
+              onClick={toggleTheme}
+              title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+              aria-label={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+            </button>
           </div>
 
           <div className="canvas-hint">
-            <button onClick={startTour} style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '4px 8px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px', pointerEvents: 'auto', fontWeight: 600 }}>Help / Tour</button>
-            Drag to pan &nbsp;•&nbsp; ⌘/Ctrl + Scroll to zoom
+            <button
+              type="button"
+              onClick={startTour}
+              style={{
+                background: 'var(--accent)',
+                color: 'white',
+                border: 'none',
+                padding: '4px 10px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                marginRight: '10px',
+                pointerEvents: 'auto',
+                fontWeight: 600,
+              }}
+            >
+              Help / Tour
+            </button>
+            <span className="canvas-hint-text">
+              Drag to pan &nbsp;•&nbsp; ⌘/Ctrl + Scroll to zoom
+            </span>
           </div>
 
-          <BubbleCanvas onBubbleClick={setSelectedClusterId} focusBubbleId={focusBubbleId} glowBubbleId={glowBubbleId} />
-          
-          <TrendingRail onBubbleClick={handleTrendingClick} />
-          
+          <BubbleCanvas
+            onBubbleClick={setSelectedClusterId}
+            focusBubbleId={focusBubbleId}
+            glowBubbleId={glowBubbleId}
+            activeCategory={activeCategory}
+            searchQuery={searchQuery}
+            showClaimedOnly={showClaimedOnly}
+            theme={theme}
+          />
+
+          <TrendingRail
+            onBubbleClick={handleTrendingClick}
+            activeCategory={activeCategory}
+            onCategoryChange={setActiveCategory}
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            showClaimedOnly={showClaimedOnly}
+            onShowClaimedOnlyChange={setShowClaimedOnly}
+          />
+
           <ProblemInput onMerged={handleMerged} />
-          
+
           {selectedClusterId && (
-            <ClaimModal 
-              clusterId={selectedClusterId} 
-              onClose={() => setSelectedClusterId(null)} 
+            <ClaimModal
+              clusterId={selectedClusterId}
+              onClose={() => setSelectedClusterId(null)}
             />
           )}
         </>
