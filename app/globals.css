@@ -1,11 +1,32 @@
 :root {
   --background: #F4EBE6;
   --foreground: #5A4448;
-  --bubble-bg: rgba(255, 255, 255, 0.4);
+  --bubble-bg: rgba(255, 255, 255, 0.55);
   --bubble-border: rgba(132, 98, 103, 0.2);
+  --surface: rgba(255, 255, 255, 0.55);
+  --surface-strong: rgba(255, 255, 255, 0.92);
+  --surface-hover: rgba(255, 255, 255, 0.78);
+  --input-bg: rgba(255, 255, 255, 0.85);
+  --modal-overlay: rgba(244, 235, 230, 0.8);
+  --chip-bg: rgba(255, 255, 255, 0.55);
   --accent: #C37D92;
   --accent-glow: rgba(195, 125, 146, 0.4);
-  --font-sans: 'Inter', -apple-system, sans-serif;
+  --font-sans: var(--font-inter), 'Inter', -apple-system, sans-serif;
+}
+
+[data-theme="dark"] {
+  --background: #171316;
+  --foreground: #F2E8EB;
+  --bubble-bg: rgba(38, 30, 35, 0.72);
+  --bubble-border: rgba(242, 232, 235, 0.14);
+  --surface: rgba(34, 27, 31, 0.78);
+  --surface-strong: rgba(32, 25, 29, 0.96);
+  --surface-hover: rgba(52, 41, 47, 0.9);
+  --input-bg: rgba(40, 32, 37, 0.92);
+  --modal-overlay: rgba(12, 9, 11, 0.78);
+  --chip-bg: rgba(52, 41, 47, 0.75);
+  --accent: #D68CA2;
+  --accent-glow: rgba(214, 140, 162, 0.35);
 }
 
 body {
@@ -16,6 +37,7 @@ body {
   font-family: var(--font-sans);
   overflow: hidden;
   overscroll-behavior: none;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 * {
@@ -23,12 +45,12 @@ body {
 }
 
 .glass-panel {
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--bubble-border);
   border-radius: 16px;
-  box-shadow: 0 4px 24px rgba(132, 98, 103, 0.05);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
 .trending-rail {
@@ -47,7 +69,7 @@ body {
 .trending-item {
   padding: 12px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.4);
+  background: var(--chip-bg);
   margin-bottom: 8px;
   cursor: pointer;
   transition: all 0.2s;
@@ -55,7 +77,7 @@ body {
 }
 
 .trending-item:hover {
-  background: rgba(255, 255, 255, 0.7);
+  background: var(--surface-hover);
   border-color: var(--accent-glow);
   transform: translateX(-4px);
 }
@@ -79,27 +101,28 @@ body {
   padding: 16px 24px;
   border-radius: 999px;
   border: 1px solid var(--bubble-border);
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--input-bg);
   backdrop-filter: blur(12px);
   color: var(--foreground);
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   outline: none;
   transition: all 0.2s ease;
-  box-shadow: 0 8px 32px rgba(132, 98, 103, 0.1);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 .problem-input::placeholder {
-  color: rgba(90, 68, 72, 0.5);
+  color: var(--foreground);
+  opacity: 0.45;
 }
 
 .problem-input:focus {
   border-color: var(--accent);
   box-shadow: 0 0 20px var(--accent-glow);
-  background: #ffffff;
+  background: var(--surface-strong);
 }
 
 .btn {
-  background: white;
+  background: var(--surface-strong);
   color: var(--foreground);
   border: 1px solid var(--bubble-border);
   padding: 10px 20px;
@@ -107,13 +130,18 @@ body {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(132, 98, 103, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
-.btn:hover {
-  background: #fdfdfd;
-  box-shadow: 0 4px 12px rgba(132, 98, 103, 0.1);
+.btn:hover:not(:disabled) {
+  background: var(--surface-hover);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
   transform: translateY(-1px);
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .btn-primary {
@@ -122,14 +150,14 @@ body {
   border-color: var(--accent);
 }
 
-.btn-primary:hover {
+.btn-primary:hover:not(:disabled) {
   background: #B26C81;
 }
 
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(244, 235, 230, 0.8);
+  background: var(--modal-overlay);
   backdrop-filter: blur(8px);
   display: flex;
   align-items: center;
@@ -138,42 +166,69 @@ body {
 }
 
 .modal-content {
-  background: rgba(255, 255, 255, 0.9);
-  padding: 40px;
+  background: var(--surface-strong);
+  color: var(--foreground);
+  padding: 36px;
   border-radius: 24px;
   border: 1px solid var(--bubble-border);
-  max-width: 480px;
+  max-width: 500px;
   width: 90%;
   max-height: 90vh;
   overflow-y: auto;
   text-align: center;
-  box-shadow: 0 24px 64px rgba(132, 98, 103, 0.15);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18);
 }
 
-.presence-counter {
+.presence-bar {
   position: fixed;
   top: 20px;
   left: 20px;
   display: flex;
   align-items: center;
   gap: 8px;
+  z-index: 10;
+}
+
+.presence-counter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.5);
+  background: var(--surface);
   backdrop-filter: blur(8px);
   border: 1px solid var(--bubble-border);
   border-radius: 999px;
   font-size: 0.9rem;
   font-weight: 500;
-  z-index: 10;
   color: var(--foreground);
+}
+
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: var(--surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--bubble-border);
+  color: var(--foreground);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--surface-hover);
+  transform: translateY(-1px);
 }
 
 .presence-dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #AEB4A9;
-  box-shadow: 0 0 8px #AEB4A9;
+  background: #10B981;
+  box-shadow: 0 0 8px #10B981;
   animation: pulse 2s infinite;
 }
 
@@ -184,7 +239,7 @@ body {
 }
 
 .fade-in {
-  animation: fadeIn 0.5s ease-out;
+  animation: fadeIn 0.4s ease-out;
 }
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
@@ -202,42 +257,55 @@ body {
   left: 20px;
   font-size: 0.8rem;
   font-weight: 500;
-  opacity: 0.5;
+  opacity: 0.75;
   pointer-events: none;
   z-index: 10;
   color: var(--foreground);
+  display: flex;
+  align-items: center;
 }
 
 /* Mobile Responsiveness */
 @media (max-width: 768px) {
   .canvas-hint {
+    top: max(12px, env(safe-area-inset-top, 12px));
+    bottom: auto;
+    left: auto;
+    right: 68px;
+    opacity: 0.95;
+  }
+
+  .canvas-hint-text {
     display: none;
   }
-  
+
   .trending-rail {
     width: calc(100% - 40px);
     bottom: 120px;
     z-index: 50;
   }
-  
+
   .problem-input-container {
     bottom: max(20px, env(safe-area-inset-bottom, 20px));
     width: 92%;
     padding-bottom: 10px;
   }
-  
+
   .problem-input {
     font-size: 1rem;
     padding: 14px 20px;
   }
 
-  .presence-counter {
+  .presence-bar {
     top: max(12px, env(safe-area-inset-top, 12px));
     left: 12px;
+  }
+
+  .presence-counter {
     font-size: 0.8rem;
     padding: 6px 12px;
   }
-  
+
   .modal-content {
     padding: 24px;
     width: 95%;
