@@ -54,6 +54,12 @@ function computeCategoryGravityMap(categories: string[]): Map<string, { x: numbe
   return map;
 }
 
+type PinchDeform = {
+  e: number;
+  ang: number;
+  wobble?: number;
+};
+
 function drawAmoeba(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -63,17 +69,34 @@ function drawAmoeba(
   seed: number,
   color: string,
   isClaimed: boolean,
-  highlighted = false
+  highlighted = false,
+  pinch?: PinchDeform
 ) {
-  const points = 10;
+  const isPinching = Boolean(pinch && Math.abs(pinch.e) > 0.005);
+  const points = isPinching ? 56 : 14;
   const vertices: { x: number; y: number }[] = [];
 
   for (let i = 0; i < points; i++) {
     const angle = (i / points) * Math.PI * 2;
-    const noise =
-      Math.sin(angle * 3 + time * 0.0015 + seed) * (r * 0.11) +
-      Math.cos(angle * 2 - time * 0.001 + seed * 2) * (r * 0.07);
-    const radius = r + noise;
+    let radius = r;
+
+    if (pinch) {
+      const rel = angle - pinch.ang;
+      const s = Math.sin(rel);
+      const s8 = s * s * s * s * s * s * s * s;
+      const e = pinch.e;
+      const wob = pinch.wobble || 0;
+      const organic =
+        Math.sin(angle * 3 + time * 0.002 + seed) * (0.04 + wob) +
+        Math.cos(angle * 2 - time * 0.0014 + seed * 2) * (0.025 + wob * 0.5);
+      radius = r * (1 + e * 0.62 * Math.cos(2 * rel) - Math.max(0, e) * 0.55 * s8 + organic);
+    } else {
+      const noise =
+        Math.sin(angle * 3 + time * 0.0015 + seed) * (r * 0.09) +
+        Math.cos(angle * 2 - time * 0.001 + seed * 2) * (r * 0.055);
+      radius = r + noise;
+    }
+
     vertices.push({
       x: x + Math.cos(angle) * radius,
       y: y + Math.sin(angle) * radius,
@@ -97,15 +120,40 @@ function drawAmoeba(
   ctx.save();
   if (highlighted) {
     ctx.shadowColor = color;
-    ctx.shadowBlur = 18;
+    ctx.shadowBlur = 22;
   }
-  ctx.fillStyle = highlighted ? `${color}CC` : `${color}99`;
+  const grad = ctx.createRadialGradient(x - r * 0.25, y - r * 0.3, r * 0.08, x, y, r * 1.15);
+  grad.addColorStop(0, highlighted ? `${color}99` : `${color}78`);
+  grad.addColorStop(0.72, highlighted ? `${color}CC` : `${color}A8`);
+  grad.addColorStop(1, highlighted ? `${color}EE` : `${color}C8`);
+  ctx.fillStyle = grad;
   ctx.fill();
   ctx.restore();
 
-  ctx.lineWidth = highlighted ? 3 : isClaimed ? 3.5 : 2;
-  ctx.strokeStyle = isClaimed ? CLAIMED_RING_COLOR : highlighted ? '#FFFFFF' : color;
+  ctx.lineWidth = highlighted ? 2.6 : isClaimed ? 3.2 : 1.8;
+  ctx.strokeStyle = isClaimed
+    ? CLAIMED_RING_COLOR
+    : highlighted
+    ? 'rgba(255, 255, 255, 0.85)'
+    : color;
   ctx.stroke();
+
+  // Tactile specular soap-bubble sheen highlight
+  if (r > 18) {
+    ctx.save();
+    ctx.translate(x - r * 0.34, y - r * 0.38);
+    ctx.rotate(-0.65);
+    const sheen = ctx.createRadialGradient(0, 0, 0, 0, 0, r * 0.26);
+    sheen.addColorStop(0, 'rgba(255, 255, 255, 0.48)');
+    sheen.addColorStop(0.5, 'rgba(255, 255, 255, 0.14)');
+    sheen.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = sheen;
+    ctx.scale(1, 0.55);
+    ctx.beginPath();
+    ctx.arc(0, 0, r * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
 
   if (isClaimed) {
     // Crisp emerald badge at top-right of bubble
@@ -160,6 +208,7 @@ type BubbleNode = {
   hiddenProblemCount: number;
   splitProgress: number;
   splitVel: number;
+  wasSnapped: boolean;
   x: number;
   y: number;
   vx: number;
@@ -306,56 +355,6 @@ function drawWrappedText(
   }
 }
 
-function drawGooeyBridge(
-  ctx: CanvasRenderingContext2D,
-  x1: number,
-  y1: number,
-  r1: number,
-  x2: number,
-  y2: number,
-  r2: number,
-  color: string,
-  pinch: number
-) {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const dist = Math.hypot(dx, dy);
-  if (dist < 2 || dist > (r1 + r2) * 2.15) return;
-
-  const angle = Math.atan2(dy, dx);
-  const perp = angle + Math.PI / 2;
-
-  const neckHalf = Math.max(2, Math.min(r1, r2) * 0.55 * (1 - pinch));
-  const midX = (x1 + x2) / 2;
-  const midY = (y1 + y2) / 2;
-
-  const a1x = x1 + Math.cos(perp) * (r1 * 0.72);
-  const a1y = y1 + Math.sin(perp) * (r1 * 0.72);
-  const a2x = x1 - Math.cos(perp) * (r1 * 0.72);
-  const a2y = y1 - Math.sin(perp) * (r1 * 0.72);
-
-  const b1x = x2 + Math.cos(perp) * (r2 * 0.72);
-  const b1y = y2 + Math.sin(perp) * (r2 * 0.72);
-  const b2x = x2 - Math.cos(perp) * (r2 * 0.72);
-  const b2y = y2 - Math.sin(perp) * (r2 * 0.72);
-
-  const c1x = midX + Math.cos(perp) * neckHalf;
-  const c1y = midY + Math.sin(perp) * neckHalf;
-  const c2x = midX - Math.cos(perp) * neckHalf;
-  const c2y = midY - Math.sin(perp) * neckHalf;
-
-  ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(a1x, a1y);
-  ctx.quadraticCurveTo(c1x, c1y, b1x, b1y);
-  ctx.lineTo(b2x, b2y);
-  ctx.quadraticCurveTo(c2x, c2y, a2x, a2y);
-  ctx.closePath();
-  ctx.fillStyle = `${color}AA`;
-  ctx.fill();
-  ctx.restore();
-}
-
 export default function BubbleCanvas({
   onBubbleClick,
   focusBubbleId,
@@ -396,6 +395,9 @@ export default function BubbleCanvas({
   const lastPointerTypeRef = useRef<string>('mouse');
   const optimisticProblemsRef = useRef<Map<string, ProblemItem[]>>(new Map());
   const autoSplitUntilRef = useRef<{ clusterId: string; until: number } | null>(null);
+  const dropletsRef = useRef<
+    { x: number; y: number; vx: number; vy: number; r: number; color: string; life: number }[]
+  >([]);
 
   // Keep latest reactive props in refs so the rAF loop never uses stale closures
   const glowBubbleIdRef = useRef<string | null | undefined>(glowBubbleId);
@@ -533,6 +535,7 @@ export default function BubbleCanvas({
           hiddenProblemCount: hiddenCount,
           splitProgress: 0,
           splitVel: 0,
+          wasSnapped: false,
           // Spawn near category gravity node with gentle ±120px jitter
           x: gravity.x + (Math.random() - 0.5) * 240,
           y: gravity.y + (Math.random() - 0.5) * 240,
@@ -719,16 +722,20 @@ export default function BubbleCanvas({
       const activeId = hoveredClusterIdRef.current;
       if (activeId && physicsState.current[activeId]) {
         const activeBubble = physicsState.current[activeId];
-        if (activeBubble.problems.length > 1 && activeBubble.splitProgress > 0.25) {
+        if (activeBubble.problems.length > 1 && activeBubble.splitProgress > 0.42) {
           const layout = getSubBubbleOffsets(activeBubble);
+          const u = (activeBubble.splitProgress - 0.42) / 0.58;
+          const uClamped = Math.min(1, Math.max(0, u));
+          const posFrac = 0.28 + 0.72 * u;
+          const sr = Math.max(
+            14,
+            activeBubble.radius * 0.72 + (layout.subRadius - activeBubble.radius * 0.72) * uClamped
+          );
           for (let s = layout.items.length - 1; s >= 0; s--) {
             const item = layout.items[s];
-            const sx = activeBubble.x + item.dx * activeBubble.splitProgress;
-            const sy = activeBubble.y + item.dy * activeBubble.splitProgress;
-            const sr =
-              activeBubble.radius +
-              (layout.subRadius - activeBubble.radius) * activeBubble.splitProgress;
-            if (Math.hypot(worldX - sx, worldY - sy) <= sr) {
+            const sx = activeBubble.x + item.dx * posFrac;
+            const sy = activeBubble.y + item.dy * posFrac;
+            if (Math.hypot(worldX - sx, worldY - sy) <= sr * 1.07) {
               onBubbleClickRef.current(activeBubble.id, item.problem.text);
               return;
             }
@@ -957,10 +964,34 @@ export default function BubbleCanvas({
         const b = bubbles[i];
         const isSplitActive = hoveredId === b.id || autoSplitId === b.id;
         const targetSplit = isSplitActive && b.problems.length > 1 ? 1 : 0;
-        // Damped spring physics for snappy elastic mitosis pop & smooth coalesce
-        const springForce = (targetSplit - b.splitProgress) * 0.14;
-        b.splitVel = (b.splitVel + springForce) * 0.72;
+        // 2-stage mitosis spring: waist pinch (0..0.42) then elastic snap (0.42..1)
+        const stiffness = b.splitProgress < 0.42 ? 0.085 : 0.13;
+        const damping = b.splitProgress < 0.42 ? 0.78 : 0.70;
+        const springForce = (targetSplit - b.splitProgress) * stiffness;
+        b.splitVel = (b.splitVel + springForce) * damping;
         b.splitProgress = Math.max(0, b.splitProgress + b.splitVel);
+
+        // Emit droplet spray right at the neck snap threshold (0.42)
+        if (!b.wasSnapped && b.splitProgress >= 0.42 && targetSplit === 1) {
+          b.wasSnapped = true;
+          const splitAng = -Math.PI / 2;
+          for (let d = 0; d < 12; d++) {
+            const perpAng = splitAng + (Math.PI / 2) * (d % 2 ? 1 : -1) + (Math.random() - 0.5) * 0.9;
+            const speed = 1.8 + Math.random() * 3.4;
+            dropletsRef.current.push({
+              x: b.x,
+              y: b.y,
+              vx: Math.cos(perpAng) * speed,
+              vy: Math.sin(perpAng) * speed,
+              r: 1.8 + Math.random() * 2.6,
+              color: b.color,
+              life: 1,
+            });
+          }
+        } else if (b.splitProgress < 0.38) {
+          b.wasSnapped = false;
+        }
+
         if (targetSplit === 0 && b.splitProgress < 0.004 && Math.abs(b.splitVel) < 0.002) {
           b.splitProgress = 0;
           b.splitVel = 0;
@@ -1062,6 +1093,7 @@ export default function BubbleCanvas({
 
       // Render splitting / split clusters on top so sub-bubbles are highlighted & unobstructed
       const isDark = themeRef.current === 'dark';
+      const SNAP_AT = 0.42;
       for (let sIdx = 0; sIdx < splitBubbles.length; sIdx++) {
         const b = splitBubbles[sIdx];
         const layout = getSubBubbleOffsets(b);
@@ -1070,74 +1102,97 @@ export default function BubbleCanvas({
 
         ctx.save();
 
-        // Soft radial ambient aura behind the splitting cluster
-        const auraR = Math.max(20, (layout.orbitRadius + layout.subRadius + 32) * pClamped);
-        const aura = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, auraR);
-        aura.addColorStop(0, `${b.color}22`);
-        aura.addColorStop(0.7, `${b.color}10`);
-        aura.addColorStop(1, `${b.color}00`);
-        ctx.fillStyle = aura;
-        ctx.beginPath();
-        ctx.arc(b.x, b.y, auraR, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Gooey metaball liquid necks while cells separate or coalesce (0.04 < p < 0.85)
-        if (pClamped > 0.04 && pClamped < 0.85) {
-          const pinch = (pClamped - 0.04) / 0.81;
-          const coreR = Math.max(12, b.radius * (1 - pClamped * 0.65));
-          for (let k = 0; k < layout.items.length; k++) {
-            const item = layout.items[k];
-            if (item.dx === 0 && item.dy === 0) continue;
-            const sx = b.x + item.dx * p;
-            const sy = b.y + item.dy * p;
-            const sr = Math.max(12, b.radius + (layout.subRadius - b.radius) * pClamped);
-            drawGooeyBridge(ctx, b.x, b.y, coreR, sx, sy, sr, b.color, pinch);
-          }
-        }
-
-        const stretchAmt = Math.min(0.24, Math.abs(b.splitVel) * 1.6);
-
-        for (let k = 0; k < layout.items.length; k++) {
-          const item = layout.items[k];
-          const sx = b.x + item.dx * p;
-          const sy = b.y + item.dy * p;
-          const sr = Math.max(14, b.radius + (layout.subRadius - b.radius) * pClamped);
-          const isSubHovered =
-            Boolean(ptr) && Math.hypot(ptr!.x - sx, ptr!.y - sy) <= sr * 1.05;
-
-          const moveAngle = Math.atan2(item.dy, item.dx);
-          const hasRadialMove = item.dx !== 0 || item.dy !== 0;
-
-          ctx.save();
-          if (hasRadialMove && stretchAmt > 0.01) {
-            ctx.translate(sx, sy);
-            ctx.rotate(moveAngle);
-            ctx.scale(1 + stretchAmt, 1 - stretchAmt * 0.45);
-            ctx.translate(-sx, -sy);
-          }
+        if (pClamped <= SNAP_AT) {
+          // Phase 1: Single bubble stretches & pinches sharply at the waist before dividing
+          const pinchProgress = pClamped / SNAP_AT;
+          const e = pinchProgress * 0.68;
+          const firstItem = layout.items[0];
+          const pinchAng = firstItem ? Math.atan2(firstItem.dy, firstItem.dx) : -Math.PI / 2;
 
           drawAmoeba(
             ctx,
-            sx,
-            sy,
-            isSubHovered ? sr * 1.07 : sr,
+            b.x,
+            b.y,
+            b.radius,
             time,
-            b.seed + k * 1.7,
+            b.seed,
             b.color,
-            k === 0 && b.hasClaims,
-            true
+            b.hasClaims,
+            true,
+            { e, ang: pinchAng, wobble: 0.03 }
           );
-          ctx.restore();
 
-          if (pClamped > 0.3 && sr * zoom > 16) {
+          if (b.radius * zoom > 16 && pinchProgress < 0.85) {
             ctx.save();
-            ctx.globalAlpha = Math.min(1, (pClamped - 0.3) / 0.45);
-            ctx.fillStyle = isDark ? '#FFF7F9' : '#2E2225';
+            ctx.globalAlpha = Math.max(0, 1 - pinchProgress / 0.85);
+            ctx.fillStyle = isDark ? '#F5ECEE' : '#4A3A3D';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
-            ctx.font = `600 12px ${font}`;
-            drawWrappedText(ctx, item.problem.text, sx, sy, sr * 1.55, 14, 3);
+            ctx.font = `600 14px ${font}`;
+            const title = b.title.length > 24 ? `${b.title.slice(0, 24)}...` : b.title;
+            ctx.fillText(title, b.x, b.y - 8);
+            ctx.font = `12px ${font}`;
+            ctx.fillStyle = isDark ? 'rgba(245, 236, 238, 0.78)' : 'rgba(74, 58, 61, 0.75)';
+            ctx.fillText(`${b.totalWeight} votes · ${b.problems.length} nuances`, b.x, b.y + 13);
             ctx.restore();
+          }
+        } else {
+          // Phase 2: Sub-bubbles snap apart with recoil elongation, wobble & ambient aura
+          const u = (p - SNAP_AT) / (1 - SNAP_AT);
+          const uClamped = Math.min(1, Math.max(0, u));
+          const posFrac = 0.28 + 0.72 * u;
+
+          const auraR = Math.max(20, (layout.orbitRadius + layout.subRadius + 32) * uClamped);
+          const aura = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, auraR);
+          aura.addColorStop(0, `${b.color}22`);
+          aura.addColorStop(0.7, `${b.color}10`);
+          aura.addColorStop(1, `${b.color}00`);
+          ctx.fillStyle = aura;
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, auraR, 0, Math.PI * 2);
+          ctx.fill();
+
+          const recoilE = Math.max(0, 1 - uClamped * 1.15) * 0.34;
+          const recoilWobble = Math.max(0, 1 - uClamped) * 0.05;
+
+          for (let k = 0; k < layout.items.length; k++) {
+            const item = layout.items[k];
+            const sx = b.x + item.dx * posFrac;
+            const sy = b.y + item.dy * posFrac;
+            const sr = Math.max(
+              14,
+              b.radius * 0.72 + (layout.subRadius - b.radius * 0.72) * uClamped
+            );
+            const isSubHovered =
+              Boolean(ptr) && Math.hypot(ptr!.x - sx, ptr!.y - sy) <= sr * 1.05;
+            const moveAngle = Math.atan2(item.dy, item.dx);
+            const hasRadialMove = item.dx !== 0 || item.dy !== 0;
+
+            drawAmoeba(
+              ctx,
+              sx,
+              sy,
+              isSubHovered ? sr * 1.07 : sr,
+              time,
+              b.seed + k * 1.7,
+              b.color,
+              k === 0 && b.hasClaims,
+              true,
+              hasRadialMove && (recoilE > 0.01 || recoilWobble > 0.005)
+                ? { e: recoilE, ang: moveAngle, wobble: recoilWobble }
+                : undefined
+            );
+
+            if (uClamped > 0.2 && sr * zoom > 16) {
+              ctx.save();
+              ctx.globalAlpha = Math.min(1, (uClamped - 0.2) / 0.45);
+              ctx.fillStyle = isDark ? '#FFF7F9' : '#2E2225';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.font = `600 12px ${font}`;
+              drawWrappedText(ctx, item.problem.text, sx, sy, sr * 1.55, 14, 3);
+              ctx.restore();
+            }
           }
         }
 
@@ -1162,6 +1217,28 @@ export default function BubbleCanvas({
           ctx.restore();
         }
 
+        ctx.restore();
+      }
+
+      // Render droplet spray particles emitted when bubbles snap apart
+      const droplets = dropletsRef.current;
+      for (let d = droplets.length - 1; d >= 0; d--) {
+        const drop = droplets[d];
+        drop.vx *= 0.96;
+        drop.vy = drop.vy * 0.96 + 0.05;
+        drop.x += drop.vx;
+        drop.y += drop.vy;
+        drop.life -= 0.032;
+        if (drop.life <= 0) {
+          droplets.splice(d, 1);
+          continue;
+        }
+        ctx.save();
+        ctx.globalAlpha = drop.life * 0.85;
+        ctx.fillStyle = drop.color;
+        ctx.beginPath();
+        ctx.arc(drop.x, drop.y, drop.r * drop.life + 0.4, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
       }
 

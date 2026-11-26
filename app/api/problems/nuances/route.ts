@@ -13,10 +13,18 @@ type NuanceEntry = {
 export async function GET() {
   try {
     const db = getAdminDb();
-    const res = await db.query({
-      clusters: { problems: {} },
-      problems: { cluster: {} },
-    });
+    let res: {
+      clusters?: Record<string, unknown>[];
+      problems?: Record<string, unknown>[];
+    };
+    try {
+      res = (await db.query({
+        clusters: { problems: {} },
+        problems: { cluster: {} },
+      })) as typeof res;
+    } catch {
+      res = (await db.query({ clusters: { problems: {} } })) as typeof res;
+    }
 
     const nuancesByCluster: Record<string, NuanceEntry[]> = {};
     const addEntry = (clusterId: string, entry: NuanceEntry) => {
@@ -27,19 +35,21 @@ export async function GET() {
     };
 
     for (const cluster of res.clusters || []) {
+      const clusterId = typeof cluster.id === 'string' ? cluster.id : '';
+      if (!clusterId) continue;
       const scalarNuances = parseNuancesField(
-        (cluster as { nuances?: string }).nuances
+        typeof cluster.nuances === 'string' ? cluster.nuances : undefined
       );
       for (let i = 0; i < scalarNuances.length; i++) {
-        addEntry(cluster.id, {
-          id: `nuance-${cluster.id}-${i}`,
+        addEntry(clusterId, {
+          id: `nuance-${clusterId}-${i}`,
           text: scalarNuances[i],
         });
       }
       if (Array.isArray(cluster.problems)) {
-        for (const p of cluster.problems) {
-          if (typeof p.text === 'string') {
-            addEntry(cluster.id, {
+        for (const p of cluster.problems as Record<string, unknown>[]) {
+          if (typeof p.id === 'string' && typeof p.text === 'string') {
+            addEntry(clusterId, {
               id: p.id,
               text: p.text,
               createdAt: typeof p.createdAt === 'number' ? p.createdAt : undefined,
@@ -50,8 +60,8 @@ export async function GET() {
     }
 
     for (const p of res.problems || []) {
-      if (typeof p.text !== 'string') continue;
-      const rawCluster = p.cluster;
+      if (typeof p.id !== 'string' || typeof p.text !== 'string') continue;
+      const rawCluster = p.cluster as { id?: string } | { id?: string }[] | undefined;
       const linked = Array.isArray(rawCluster)
         ? rawCluster
         : rawCluster
