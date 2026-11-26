@@ -206,6 +206,7 @@ function getSubBubbleOffsets(b: BubbleNode): {
 } {
   const count = b.problems.length;
   const subRadius = Math.max(38, Math.min(54, b.radius * 0.54));
+  const minCenterGap = subRadius * 2.65;
 
   if (count <= 1) {
     return { subRadius: b.radius, orbitRadius: 0, items: [] };
@@ -214,8 +215,8 @@ function getSubBubbleOffsets(b: BubbleNode): {
   if (count >= 7) {
     const outerCount = count - 1;
     const orbitRadius = Math.max(
-      subRadius * 2.4,
-      (subRadius * 2.25) / (2 * Math.sin(Math.PI / outerCount))
+      minCenterGap,
+      minCenterGap / (2 * Math.sin(Math.PI / outerCount))
     );
     const items = b.problems.map((problem, idx) => {
       if (idx === 0) return { problem, dx: 0, dy: 0 };
@@ -230,8 +231,8 @@ function getSubBubbleOffsets(b: BubbleNode): {
   }
 
   const orbitRadius = Math.max(
-    b.radius * 0.8,
-    (subRadius * 2.3) / (2 * Math.sin(Math.PI / count))
+    b.radius * 0.95,
+    minCenterGap / (2 * Math.sin(Math.PI / count))
   );
   const items = b.problems.map((problem, idx) => {
     const angle = (idx / count) * Math.PI * 2 - Math.PI / 2;
@@ -307,7 +308,7 @@ export default function BubbleCanvas({
   const viewportSize = useRef({ width: 1200, height: 800, dpr: 1 });
   const fontFamilyRef = useRef<string>('Inter, sans-serif');
   const hoveredClusterIdRef = useRef<string | null>(null);
-  const pointerWorldRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerClientRef = useRef<{ x: number; y: number } | null>(null);
   const lastPointerTypeRef = useRef<string>('mouse');
 
   // Keep latest reactive props in refs so the rAF loop never uses stale closures
@@ -487,7 +488,7 @@ export default function BubbleCanvas({
       activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       targetBubbleId.current = null;
       if (e.pointerType !== 'touch') {
-        pointerWorldRef.current = toWorldCoords(e.clientX, e.clientY);
+        pointerClientRef.current = { x: e.clientX, y: e.clientY };
       }
       if (activePointers.size === 1) {
         clickStartX = e.clientX;
@@ -506,8 +507,16 @@ export default function BubbleCanvas({
 
     const handlePointerMove = (e: PointerEvent) => {
       lastPointerTypeRef.current = e.pointerType || 'mouse';
-      if (e.pointerType !== 'touch' && activePointers.size === 0) {
-        pointerWorldRef.current = toWorldCoords(e.clientX, e.clientY);
+      if (e.pointerType !== 'touch') {
+        if (e.buttons === 0 && activePointers.size > 0) {
+          activePointers.clear();
+        }
+        if (e.target === canvas) {
+          pointerClientRef.current = { x: e.clientX, y: e.clientY };
+        } else if (activePointers.size === 0) {
+          pointerClientRef.current = null;
+          hoveredClusterIdRef.current = null;
+        }
       }
 
       const prev = activePointers.get(e.pointerId);
@@ -537,7 +546,7 @@ export default function BubbleCanvas({
 
     const handlePointerLeave = () => {
       if (lastPointerTypeRef.current !== 'touch') {
-        pointerWorldRef.current = null;
+        pointerClientRef.current = null;
         hoveredClusterIdRef.current = null;
       }
     };
@@ -746,9 +755,13 @@ export default function BubbleCanvas({
       const activeGlowId = glowBubbleIdRef.current;
       const font = fontFamilyRef.current;
 
+      // Compute live world pointer coordinates every frame so pan/zoom stays synced
+      const ptr = pointerClientRef.current
+        ? toWorldCoords(pointerClientRef.current.x, pointerClientRef.current.y)
+        : null;
+
       // Update hover target with generous anti-flicker ring for split bubbles
       if (lastPointerTypeRef.current !== 'touch' && activePointers.size === 0) {
-        const ptr = pointerWorldRef.current;
         if (ptr) {
           let nextHoverId: string | null = null;
           const currentHoverId = hoveredClusterIdRef.current;
@@ -757,7 +770,7 @@ export default function BubbleCanvas({
             const hb = physicsState.current[currentHoverId];
             if (hb.problems.length > 1 && hb.splitProgress > 0.05) {
               const layout = getSubBubbleOffsets(hb);
-              const hitZone = layout.orbitRadius + layout.subRadius + 28;
+              const hitZone = layout.orbitRadius + layout.subRadius + 32;
               if (Math.hypot(ptr.x - hb.x, ptr.y - hb.y) <= hitZone) {
                 nextHoverId = hb.id;
               }
@@ -767,7 +780,7 @@ export default function BubbleCanvas({
           if (!nextHoverId) {
             for (let i = bubbles.length - 1; i >= 0; i--) {
               const b = bubbles[i];
-              if (Math.hypot(ptr.x - b.x, ptr.y - b.y) <= b.radius * 1.1) {
+              if (Math.hypot(ptr.x - b.x, ptr.y - b.y) <= b.radius * 1.12) {
                 nextHoverId = b.id;
                 break;
               }
@@ -776,6 +789,9 @@ export default function BubbleCanvas({
 
           hoveredClusterIdRef.current = nextHoverId;
           canvas.style.cursor = nextHoverId ? 'pointer' : 'grab';
+        } else {
+          hoveredClusterIdRef.current = null;
+          canvas.style.cursor = 'grab';
         }
       }
 
@@ -827,6 +843,7 @@ export default function BubbleCanvas({
         }
 
         const isHoveredSingle = hoveredId === b.id;
+        const isGlowing = Boolean(activeGlowId && b.id === activeGlowId);
 
         ctx.save();
         if (!matchesFilter) {
@@ -835,10 +852,17 @@ export default function BubbleCanvas({
           ctx.globalAlpha = 1 - maxSplit * 0.65;
         }
 
-        let drawColor = b.color;
-        if (activeGlowId && b.id === activeGlowId) {
-          const colorIndex = Math.floor(time / 50) % PALETTE.length;
-          drawColor = PALETTE[colorIndex];
+        // Gentle single-color pulse ring on merge instead of flashing random colors
+        if (isGlowing) {
+          const pulse = (Math.sin(time * 0.008) + 1) / 2;
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.radius + 8 + pulse * 10, 0, Math.PI * 2);
+          ctx.strokeStyle = b.color;
+          ctx.globalAlpha = 0.25 + pulse * 0.45;
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.restore();
         }
 
         drawAmoeba(
@@ -848,9 +872,9 @@ export default function BubbleCanvas({
           b.radius,
           time,
           b.seed,
-          drawColor,
+          b.color,
           b.hasClaims,
-          isHoveredSingle
+          isHoveredSingle || isGlowing
         );
 
         if (b.radius * zoom > 16) {
@@ -876,7 +900,6 @@ export default function BubbleCanvas({
       }
 
       // Render splitting / split clusters on top so sub-bubbles are highlighted & unobstructed
-      const ptr = pointerWorldRef.current;
       const isDark = themeRef.current === 'dark';
       for (let sIdx = 0; sIdx < splitBubbles.length; sIdx++) {
         const b = splitBubbles[sIdx];
