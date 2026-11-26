@@ -228,9 +228,11 @@ export default function TrendingRail({
           className="no-scrollbar"
           style={{
             display: 'flex',
+            flexWrap: 'wrap',
             alignItems: 'center',
             gap: '6px',
-            overflowX: 'auto',
+            maxHeight: '110px',
+            overflowY: 'auto',
             paddingTop: '2px',
             paddingBottom: '10px',
             marginBottom: '6px',
