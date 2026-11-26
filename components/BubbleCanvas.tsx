@@ -120,6 +120,33 @@ function drawAmoeba(
   }
 }
 
+type ClusterRecord = {
+  id: string;
+  title: string;
+  totalWeight?: number;
+  submissionCount?: number;
+  category?: string;
+  claimedByName?: string;
+  claims?: { id: string }[];
+};
+
+type BubbleNode = {
+  id: string;
+  title: string;
+  totalWeight: number;
+  submissionCount: number;
+  category?: string;
+  hasClaims: boolean;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  targetRadius: number;
+  radius: number;
+  color: string;
+  seed: number;
+};
+
 export default function BubbleCanvas({
   onBubbleClick,
   focusBubbleId,
@@ -132,7 +159,7 @@ export default function BubbleCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const { data } = db.useQuery({ clusters: { claims: {} } });
 
-  const physicsState = useRef<Record<string, any>>({});
+  const physicsState = useRef<Record<string, BubbleNode>>({});
   const categoryGravityRef = useRef<Map<string, { x: number; y: number }>>(new Map());
   const camera = useRef({ x: 0, y: 0, zoom: 1 });
   const targetBubbleId = useRef<string | null>(null);
@@ -205,28 +232,32 @@ export default function BubbleCanvas({
   useEffect(() => {
     if (!data?.clusters) return;
 
+    const clusters = data.clusters as ClusterRecord[];
     const gravityMap = computeCategoryGravityMap(
-      data.clusters.map((c: any) => c.category || 'Unknown')
+      clusters.map((c) => c.category || 'Unknown')
     );
     categoryGravityRef.current = gravityMap;
 
-    const currentIds = new Set(data.clusters.map((c: any) => c.id));
+    const currentIds = new Set(clusters.map((c) => c.id));
     for (const id in physicsState.current) {
       if (!currentIds.has(id)) delete physicsState.current[id];
     }
 
-    data.clusters.forEach((cluster: any) => {
+    clusters.forEach((cluster) => {
       const weight = Math.max(1, cluster.totalWeight || 1);
       // Logarithmic & capped radius so viral outliers don't crush smaller bubbles
       const targetRadius = Math.min(165, 44 + Math.log1p(weight) * 20);
       const isClaimed =
-        Boolean(cluster.claimedByName) || (cluster.claims && cluster.claims.length > 0);
+        Boolean(cluster.claimedByName) || Boolean(cluster.claims && cluster.claims.length > 0);
       const gravity =
         (cluster.category && gravityMap.get(cluster.category)) || { x: 0, y: 0 };
 
       if (!physicsState.current[cluster.id]) {
         physicsState.current[cluster.id] = {
-          ...cluster,
+          id: cluster.id,
+          title: cluster.title,
+          totalWeight: cluster.totalWeight || 1,
+          category: cluster.category,
           hasClaims: isClaimed,
           // Spawn near category gravity node with gentle ±120px jitter
           x: gravity.x + (Math.random() - 0.5) * 240,
@@ -242,7 +273,7 @@ export default function BubbleCanvas({
       } else {
         const b = physicsState.current[cluster.id];
         b.title = cluster.title;
-        b.totalWeight = cluster.totalWeight;
+        b.totalWeight = cluster.totalWeight || 1;
         b.hasClaims = isClaimed;
         b.targetRadius = targetRadius;
         b.category = cluster.category;

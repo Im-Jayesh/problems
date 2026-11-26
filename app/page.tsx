@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useSyncExternalStore } from 'react';
 import { db } from '@/lib/db';
 import { driver } from 'driver.js';
 import 'driver.js/dist/driver.css';
@@ -12,10 +12,36 @@ import Onboarding from '@/components/Onboarding';
 import ClaimModal from '@/components/ClaimModal';
 import ToastProvider from '@/components/ToastProvider';
 
+const subscribeTheme = (cb: () => void) => {
+  window.addEventListener('theme-change', cb);
+  return () => window.removeEventListener('theme-change', cb);
+};
+
+const getThemeSnapshot = (): 'light' | 'dark' => {
+  const saved = localStorage.getItem('theme');
+  if (saved === 'dark' || saved === 'light') return saved;
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+};
+
+const getServerThemeSnapshot = (): 'light' | 'dark' => 'light';
+
+const subscribeIntro = (cb: () => void) => {
+  window.addEventListener('intro-change', cb);
+  return () => window.removeEventListener('intro-change', cb);
+};
+
+const getIntroSnapshot = (): boolean => !localStorage.getItem('seen_intro');
+const getServerIntroSnapshot = (): boolean => false;
+
+const subscribeMounted = () => () => {};
+const getMountedSnapshot = (): boolean => true;
+const getServerMountedSnapshot = (): boolean => false;
+
 export default function Home() {
-  const [mounted, setMounted] = useState(false);
-  const [showIntro, setShowIntro] = useState(false);
-  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+  const mounted = useSyncExternalStore(subscribeMounted, getMountedSnapshot, getServerMountedSnapshot);
+  const showIntro = useSyncExternalStore(subscribeIntro, getIntroSnapshot, getServerIntroSnapshot);
+  const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
+
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
   const [focusBubbleId, setFocusBubbleId] = useState<string | null>(null);
   const [glowBubbleId, setGlowBubbleId] = useState<string | null>(null);
@@ -37,14 +63,10 @@ export default function Home() {
     }, 4000);
   };
 
-  const applyTheme = useCallback((next: 'light' | 'dark') => {
-    setTheme(next);
-    document.documentElement.setAttribute('data-theme', next);
-    localStorage.setItem('theme', next);
-  }, []);
-
   const toggleTheme = () => {
-    applyTheme(theme === 'dark' ? 'light' : 'dark');
+    const next = theme === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('theme', next);
+    window.dispatchEvent(new Event('theme-change'));
   };
 
   const startTour = useCallback(() => {
@@ -89,22 +111,12 @@ export default function Home() {
   const { peers, publishPresence } = db.rooms.usePresence(db.room('lobby'));
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark' || savedTheme === 'light') {
-      applyTheme(savedTheme);
-    } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      applyTheme('dark');
-    } else {
-      applyTheme('light');
-    }
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-    const seen = localStorage.getItem('seen_intro');
-    if (!seen) {
-      setShowIntro(true);
-    }
-    setMounted(true);
+  useEffect(() => {
     publishPresence({ active: true, lastActive: Date.now() });
-  }, [applyTheme, publishPresence]);
+  }, [publishPresence]);
 
   // Only start the tour once Onboarding is closed and board DOM is mounted
   useEffect(() => {
@@ -120,7 +132,7 @@ export default function Home() {
 
   const handleFinishIntro = () => {
     localStorage.setItem('seen_intro', 'true');
-    setShowIntro(false);
+    window.dispatchEvent(new Event('intro-change'));
   };
 
   return (
@@ -193,6 +205,7 @@ export default function Home() {
 
           {selectedClusterId && (
             <ClaimModal
+              key={selectedClusterId}
               clusterId={selectedClusterId}
               onClose={() => setSelectedClusterId(null)}
             />

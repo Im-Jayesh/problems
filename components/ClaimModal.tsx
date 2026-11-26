@@ -15,6 +15,18 @@ function isSafeHttpUrl(raw?: string): boolean {
   }
 }
 
+type ProblemRecord = {
+  id: string;
+  text: string;
+};
+
+type ClaimRecord = {
+  id: string;
+  name: string;
+  link: string;
+  message: string;
+};
+
 export default function ClaimModal({
   clusterId,
   onClose,
@@ -30,17 +42,12 @@ export default function ClaimModal({
   const [name, setName] = useState('');
   const [link, setLink] = useState('');
   const [msg, setMsg] = useState('');
-  const [hasClaimed, setHasClaimed] = useState(false);
-  const [hasVoted, setHasVoted] = useState(false);
-
-  useEffect(() => {
-    if (localStorage.getItem(`claimed_${clusterId}`)) {
-      setHasClaimed(true);
-    }
-    if (localStorage.getItem(`plus_one_${clusterId}`)) {
-      setHasVoted(true);
-    }
-  }, [clusterId]);
+  const [hasClaimed, setHasClaimed] = useState(() =>
+    typeof window !== 'undefined' ? Boolean(localStorage.getItem(`claimed_${clusterId}`)) : false
+  );
+  const [hasVoted, setHasVoted] = useState(() =>
+    typeof window !== 'undefined' ? Boolean(localStorage.getItem(`plus_one_${clusterId}`)) : false
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -165,9 +172,9 @@ export default function ClaimModal({
             <div style={{ fontWeight: 600, opacity: 0.7, marginBottom: '4px' }}>
               Also includes:
             </div>
-            {cluster.problems
-              .filter((p: any) => p.text !== cluster.title)
-              .map((p: any) => (
+            {(cluster.problems as ProblemRecord[])
+              .filter((p) => p.text !== cluster.title)
+              .map((p) => (
                 <div
                   key={p.id}
                   style={{
@@ -208,7 +215,7 @@ export default function ClaimModal({
                 paddingRight: '8px',
               }}
             >
-              {cluster.claims.map((claim: any) => (
+              {(cluster.claims as ClaimRecord[]).map((claim) => (
                 <div
                   key={claim.id}
                   style={{
