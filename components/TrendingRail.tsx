@@ -1,10 +1,22 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { db } from '@/lib/db';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 
 export type SortMode = 'top' | 'trending' | 'newest' | 'most_reported';
+
+type ClusterItem = {
+  id: string;
+  title: string;
+  category?: string;
+  totalWeight?: number;
+  velocity?: number;
+  createdAt?: number;
+  submissionCount?: number;
+  claimedByName?: string;
+  claims?: { id: string }[];
+};
 
 type TrendingRailProps = {
   onBubbleClick: (id: string) => void;
@@ -32,21 +44,17 @@ export default function TrendingRail({
   showClaimedOnly,
   onShowClaimedOnlyChange,
 }: TrendingRailProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(() =>
+    typeof window !== 'undefined' && window.innerWidth <= 768
+  );
   const [sortMode, setSortMode] = useState<SortMode>('top');
-
-  useEffect(() => {
-    if (window.innerWidth <= 768) {
-      setIsCollapsed(true);
-    }
-  }, []);
 
   const { data, isLoading } = db.useQuery({ clusters: { claims: {} } });
 
   const categories = useMemo(() => {
     if (!data?.clusters) return [];
     const cats = new Set<string>();
-    data.clusters.forEach((c: any) => {
+    (data.clusters as ClusterItem[]).forEach((c) => {
       const cat = c.category && c.category !== 'Unknown' ? c.category : 'General';
       cats.add(cat);
     });
@@ -55,11 +63,11 @@ export default function TrendingRail({
 
   if (isLoading || !data) return null;
 
-  const isClusterClaimed = (c: any) =>
-    Boolean(c.claimedByName) || (c.claims && c.claims.length > 0);
+  const isClusterClaimed = (c: ClusterItem) =>
+    Boolean(c.claimedByName) || Boolean(c.claims && c.claims.length > 0);
 
   const term = searchQuery.trim().toLowerCase();
-  const filteredClusters = [...data.clusters].filter((c: any) => {
+  const filteredClusters = [...(data.clusters as ClusterItem[])].filter((c) => {
     const cat = c.category && c.category !== 'Unknown' ? c.category : 'General';
     if (activeCategory && cat !== activeCategory) return false;
     if (showClaimedOnly && !isClusterClaimed(c)) return false;
@@ -72,7 +80,7 @@ export default function TrendingRail({
   });
 
   const sortedClusters = filteredClusters
-    .sort((a: any, b: any) => {
+    .sort((a, b) => {
       switch (sortMode) {
         case 'trending':
           return (b.velocity || 0) - (a.velocity || 0);
@@ -87,7 +95,7 @@ export default function TrendingRail({
     })
     .slice(0, 20);
 
-  const grouped = sortedClusters.reduce((acc: Record<string, any[]>, cluster: any) => {
+  const grouped = sortedClusters.reduce<Record<string, ClusterItem[]>>((acc, cluster) => {
     const cat =
       cluster.category && cluster.category !== 'Unknown' ? cluster.category : 'General';
     if (!acc[cat]) acc[cat] = [];
