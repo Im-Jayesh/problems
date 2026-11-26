@@ -29,9 +29,11 @@ type ClaimRecord = {
 
 export default function ClaimModal({
   clusterId,
+  highlightProblemText = null,
   onClose,
 }: {
   clusterId: string;
+  highlightProblemText?: string | null;
   onClose: () => void;
 }) {
   const { data, isLoading } = db.useQuery({
@@ -248,20 +250,26 @@ export default function ClaimModal({
             </div>
             {(cluster.problems as ProblemRecord[])
               .filter((p) => p.text !== cluster.title)
-              .map((p) => (
-                <div
-                  key={p.id}
-                  style={{
-                    padding: '6px 10px',
-                    background: 'var(--surface)',
-                    borderRadius: '8px',
-                    borderLeft: '2px solid var(--accent)',
-                    lineHeight: 1.4,
-                  }}
-                >
-                  &ldquo;{p.text}&rdquo;
-                </div>
-              ))}
+              .map((p) => {
+                const isSelected =
+                  Boolean(highlightProblemText) &&
+                  p.text.trim().toLowerCase() === highlightProblemText!.trim().toLowerCase();
+                return (
+                  <div
+                    key={p.id}
+                    style={{
+                      padding: '6px 10px',
+                      background: isSelected ? 'rgba(195, 125, 146, 0.14)' : 'var(--surface)',
+                      borderRadius: '8px',
+                      borderLeft: `${isSelected ? '3px' : '2px'} solid var(--accent)`,
+                      fontWeight: isSelected ? 600 : 400,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    &ldquo;{p.text}&rdquo;
+                  </div>
+                );
+              })}
           </div>
         )}
 

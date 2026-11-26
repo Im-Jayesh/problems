@@ -43,6 +43,7 @@ export default function Home() {
   const theme = useSyncExternalStore(subscribeTheme, getThemeSnapshot, getServerThemeSnapshot);
 
   const [selectedClusterId, setSelectedClusterId] = useState<string | null>(null);
+  const [selectedProblemText, setSelectedProblemText] = useState<string | null>(null);
   const [focusBubbleId, setFocusBubbleId] = useState<string | null>(null);
   const [glowBubbleId, setGlowBubbleId] = useState<string | null>(null);
 
@@ -50,9 +51,15 @@ export default function Home() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showClaimedOnly, setShowClaimedOnly] = useState(false);
 
+  const handleCanvasBubbleClick = (id: string, problemText?: string) => {
+    setSelectedClusterId(id);
+    setSelectedProblemText(problemText || null);
+  };
+
   const handleTrendingClick = (id: string) => {
     setFocusBubbleId(id);
     setSelectedClusterId(id);
+    setSelectedProblemText(null);
   };
 
   const handleMerged = (id: string) => {
@@ -177,12 +184,12 @@ export default function Home() {
               Help / Tour
             </button>
             <span className="canvas-hint-text">
-              Drag to pan &nbsp;•&nbsp; ⌘/Ctrl + Scroll to zoom
+              Hover merged bubbles to split &nbsp;•&nbsp; Drag to pan &nbsp;•&nbsp; ⌘/Ctrl + Scroll to zoom
             </span>
           </div>
 
           <BubbleCanvas
-            onBubbleClick={setSelectedClusterId}
+            onBubbleClick={handleCanvasBubbleClick}
             focusBubbleId={focusBubbleId}
             glowBubbleId={glowBubbleId}
             activeCategory={activeCategory}
@@ -205,9 +212,13 @@ export default function Home() {
 
           {selectedClusterId && (
             <ClaimModal
-              key={selectedClusterId}
+              key={`${selectedClusterId}:${selectedProblemText || ''}`}
               clusterId={selectedClusterId}
-              onClose={() => setSelectedClusterId(null)}
+              highlightProblemText={selectedProblemText}
+              onClose={() => {
+                setSelectedClusterId(null);
+                setSelectedProblemText(null);
+              }}
             />
           )}
         </>

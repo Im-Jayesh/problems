@@ -4,7 +4,7 @@ import { useEffect, useRef } from 'react';
 import { db } from '@/lib/db';
 
 type BubbleCanvasProps = {
-  onBubbleClick: (id: string) => void;
+  onBubbleClick: (id: string, problemText?: string) => void;
   focusBubbleId?: string | null;
   glowBubbleId?: string | null;
   activeCategory?: string | null;
@@ -60,7 +60,8 @@ function drawAmoeba(
   time: number,
   seed: number,
   color: string,
-  isClaimed: boolean
+  isClaimed: boolean,
+  highlighted = false
 ) {
   const points = 10;
   const vertices: { x: number; y: number }[] = [];
@@ -91,11 +92,17 @@ function drawAmoeba(
   }
   ctx.closePath();
 
-  ctx.fillStyle = `${color}99`;
+  ctx.save();
+  if (highlighted) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 18;
+  }
+  ctx.fillStyle = highlighted ? `${color}CC` : `${color}99`;
   ctx.fill();
+  ctx.restore();
 
-  ctx.lineWidth = isClaimed ? 3.5 : 2;
-  ctx.strokeStyle = isClaimed ? CLAIMED_RING_COLOR : color;
+  ctx.lineWidth = highlighted ? 3 : isClaimed ? 3.5 : 2;
+  ctx.strokeStyle = isClaimed ? CLAIMED_RING_COLOR : highlighted ? '#FFFFFF' : color;
   ctx.stroke();
 
   if (isClaimed) {
@@ -120,6 +127,14 @@ function drawAmoeba(
   }
 }
 
+const MAX_SUB_BUBBLES = 9;
+
+type ProblemItem = {
+  id: string;
+  text: string;
+  createdAt?: number;
+};
+
 type ClusterRecord = {
   id: string;
   title: string;
@@ -128,6 +143,7 @@ type ClusterRecord = {
   category?: string;
   claimedByName?: string;
   claims?: { id: string }[];
+  problems?: ProblemItem[];
 };
 
 type BubbleNode = {
@@ -137,6 +153,9 @@ type BubbleNode = {
   submissionCount: number;
   category?: string;
   hasClaims: boolean;
+  problems: ProblemItem[];
+  hiddenProblemCount: number;
+  splitProgress: number;
   x: number;
   y: number;
   vx: number;
@@ -146,6 +165,128 @@ type BubbleNode = {
   color: string;
   seed: number;
 };
+
+function dedupeProblems(title: string, rawProblems?: ProblemItem[]): {
+  visible: ProblemItem[];
+  hiddenCount: number;
+} {
+  const seen = new Set<string>();
+  const unique: ProblemItem[] = [];
+
+  const pushIfUnique = (item: ProblemItem) => {
+    const key = item.text.trim().toLowerCase();
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    unique.push(item);
+  };
+
+  // Ensure the primary cluster title appears first
+  pushIfUnique({ id: 'primary', text: title });
+
+  const sorted = [...(rawProblems || [])].sort(
+    (a, b) => (b.createdAt || 0) - (a.createdAt || 0)
+  );
+  for (const p of sorted) {
+    pushIfUnique(p);
+  }
+
+  if (unique.length <= MAX_SUB_BUBBLES) {
+    return { visible: unique, hiddenCount: 0 };
+  }
+  return {
+    visible: unique.slice(0, MAX_SUB_BUBBLES),
+    hiddenCount: unique.length - MAX_SUB_BUBBLES,
+  };
+}
+
+function getSubBubbleOffsets(b: BubbleNode): {
+  subRadius: number;
+  orbitRadius: number;
+  items: { problem: ProblemItem; dx: number; dy: number }[];
+} {
+  const count = b.problems.length;
+  const subRadius = Math.max(38, Math.min(54, b.radius * 0.54));
+
+  if (count <= 1) {
+    return { subRadius: b.radius, orbitRadius: 0, items: [] };
+  }
+
+  if (count >= 7) {
+    const outerCount = count - 1;
+    const orbitRadius = Math.max(
+      subRadius * 2.4,
+      (subRadius * 2.25) / (2 * Math.sin(Math.PI / outerCount))
+    );
+    const items = b.problems.map((problem, idx) => {
+      if (idx === 0) return { problem, dx: 0, dy: 0 };
+      const angle = ((idx - 1) / outerCount) * Math.PI * 2 - Math.PI / 2;
+      return {
+        problem,
+        dx: Math.cos(angle) * orbitRadius,
+        dy: Math.sin(angle) * orbitRadius,
+      };
+    });
+    return { subRadius, orbitRadius, items };
+  }
+
+  const orbitRadius = Math.max(
+    b.radius * 0.8,
+    (subRadius * 2.3) / (2 * Math.sin(Math.PI / count))
+  );
+  const items = b.problems.map((problem, idx) => {
+    const angle = (idx / count) * Math.PI * 2 - Math.PI / 2;
+    return {
+      problem,
+      dx: Math.cos(angle) * orbitRadius,
+      dy: Math.sin(angle) * orbitRadius,
+    };
+  });
+  return { subRadius, orbitRadius, items };
+}
+
+function drawWrappedText(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  lineHeight: number,
+  maxLines: number
+) {
+  const words = text.trim().split(/\s+/);
+  const lines: string[] = [];
+  let current = '';
+
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const test = current ? `${current} ${word}` : word;
+    if (ctx.measureText(test).width <= maxWidth) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+      if (lines.length === maxLines - 1) {
+        // Fit remaining words into last line with ellipsis if needed
+        const rest = [current, ...words.slice(i + 1)].join(' ');
+        let clipped = rest;
+        while (clipped.length > 3 && ctx.measureText(`${clipped}...`).width > maxWidth) {
+          clipped = clipped.slice(0, -1);
+        }
+        lines.push(clipped === rest ? clipped : `${clipped.trimEnd()}...`);
+        current = '';
+        break;
+      }
+    }
+  }
+  if (current && lines.length < maxLines) {
+    lines.push(current);
+  }
+
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], x, startY + i * lineHeight);
+  }
+}
 
 export default function BubbleCanvas({
   onBubbleClick,
@@ -157,7 +298,7 @@ export default function BubbleCanvas({
   theme = 'light',
 }: BubbleCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const { data } = db.useQuery({ clusters: { claims: {} } });
+  const { data } = db.useQuery({ clusters: { claims: {}, problems: {} } });
 
   const physicsState = useRef<Record<string, BubbleNode>>({});
   const categoryGravityRef = useRef<Map<string, { x: number; y: number }>>(new Map());
@@ -165,6 +306,9 @@ export default function BubbleCanvas({
   const targetBubbleId = useRef<string | null>(null);
   const viewportSize = useRef({ width: 1200, height: 800, dpr: 1 });
   const fontFamilyRef = useRef<string>('Inter, sans-serif');
+  const hoveredClusterIdRef = useRef<string | null>(null);
+  const pointerWorldRef = useRef<{ x: number; y: number } | null>(null);
+  const lastPointerTypeRef = useRef<string>('mouse');
 
   // Keep latest reactive props in refs so the rAF loop never uses stale closures
   const glowBubbleIdRef = useRef<string | null | undefined>(glowBubbleId);
@@ -252,6 +396,8 @@ export default function BubbleCanvas({
       const gravity =
         (cluster.category && gravityMap.get(cluster.category)) || { x: 0, y: 0 };
 
+      const { visible, hiddenCount } = dedupeProblems(cluster.title, cluster.problems);
+
       if (!physicsState.current[cluster.id]) {
         physicsState.current[cluster.id] = {
           id: cluster.id,
@@ -259,6 +405,9 @@ export default function BubbleCanvas({
           totalWeight: cluster.totalWeight || 1,
           category: cluster.category,
           hasClaims: isClaimed,
+          problems: visible,
+          hiddenProblemCount: hiddenCount,
+          splitProgress: 0,
           // Spawn near category gravity node with gentle ±120px jitter
           x: gravity.x + (Math.random() - 0.5) * 240,
           y: gravity.y + (Math.random() - 0.5) * 240,
@@ -275,6 +424,8 @@ export default function BubbleCanvas({
         b.title = cluster.title;
         b.totalWeight = cluster.totalWeight || 1;
         b.hasClaims = isClaimed;
+        b.problems = visible;
+        b.hiddenProblemCount = hiddenCount;
         b.targetRadius = targetRadius;
         b.category = cluster.category;
         b.color = getCategoryColor(cluster.category);
@@ -321,9 +472,23 @@ export default function BubbleCanvas({
       }
     };
 
+    const toWorldCoords = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const mx = clientX - rect.left;
+      const my = clientY - rect.top;
+      return {
+        x: (mx - rect.width / 2) / camera.current.zoom + camera.current.x,
+        y: (my - rect.height / 2) / camera.current.zoom + camera.current.y,
+      };
+    };
+
     const handlePointerDown = (e: PointerEvent) => {
+      lastPointerTypeRef.current = e.pointerType || 'mouse';
       activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       targetBubbleId.current = null;
+      if (e.pointerType !== 'touch') {
+        pointerWorldRef.current = toWorldCoords(e.clientX, e.clientY);
+      }
       if (activePointers.size === 1) {
         clickStartX = e.clientX;
         clickStartY = e.clientY;
@@ -340,6 +505,11 @@ export default function BubbleCanvas({
     };
 
     const handlePointerMove = (e: PointerEvent) => {
+      lastPointerTypeRef.current = e.pointerType || 'mouse';
+      if (e.pointerType !== 'touch' && activePointers.size === 0) {
+        pointerWorldRef.current = toWorldCoords(e.clientX, e.clientY);
+      }
+
       const prev = activePointers.get(e.pointerId);
       if (!prev) return;
 
@@ -365,6 +535,13 @@ export default function BubbleCanvas({
       }
     };
 
+    const handlePointerLeave = () => {
+      if (lastPointerTypeRef.current !== 'touch') {
+        pointerWorldRef.current = null;
+        hoveredClusterIdRef.current = null;
+      }
+    };
+
     const handlePointerUp = (e: PointerEvent) => {
       activePointers.delete(e.pointerId);
       if (activePointers.size < 2) {
@@ -372,7 +549,7 @@ export default function BubbleCanvas({
         prevPinchMid = null;
       }
       if (activePointers.size === 0) {
-        canvas.style.cursor = 'grab';
+        canvas.style.cursor = hoveredClusterIdRef.current ? 'pointer' : 'grab';
       }
     };
 
@@ -382,19 +559,57 @@ export default function BubbleCanvas({
         return;
       }
 
-      const rect = canvas.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
+      const { x: worldX, y: worldY } = toWorldCoords(e.clientX, e.clientY);
+      const bubbles = Object.values(physicsState.current);
 
-      const worldX = (mx - rect.width / 2) / camera.current.zoom + camera.current.x;
-      const worldY = (my - rect.height / 2) / camera.current.zoom + camera.current.y;
+      // Check active split sub-bubbles first
+      const activeId = hoveredClusterIdRef.current;
+      if (activeId && physicsState.current[activeId]) {
+        const activeBubble = physicsState.current[activeId];
+        if (activeBubble.problems.length > 1 && activeBubble.splitProgress > 0.25) {
+          const layout = getSubBubbleOffsets(activeBubble);
+          for (let s = layout.items.length - 1; s >= 0; s--) {
+            const item = layout.items[s];
+            const sx = activeBubble.x + item.dx * activeBubble.splitProgress;
+            const sy = activeBubble.y + item.dy * activeBubble.splitProgress;
+            const sr =
+              activeBubble.radius +
+              (layout.subRadius - activeBubble.radius) * activeBubble.splitProgress;
+            if (Math.hypot(worldX - sx, worldY - sy) <= sr) {
+              onBubbleClickRef.current(activeBubble.id, item.problem.text);
+              return;
+            }
+          }
+          // Clicking center of an expanded cluster on touch opens the modal
+          if (
+            Math.hypot(worldX - activeBubble.x, worldY - activeBubble.y) <=
+            layout.orbitRadius + layout.subRadius
+          ) {
+            onBubbleClickRef.current(activeBubble.id);
+            return;
+          }
+          // Tapping outside collapses touch-expanded cluster
+          if (lastPointerTypeRef.current === 'touch') {
+            hoveredClusterIdRef.current = null;
+            return;
+          }
+        }
+      }
 
       // Reverse iterate so top-most rendered bubble wins hit-testing
-      const bubbles = Object.values(physicsState.current);
       for (let i = bubbles.length - 1; i >= 0; i--) {
         const b = bubbles[i];
         const dist = Math.hypot(worldX - b.x, worldY - b.y);
         if (dist <= b.radius) {
+          // On touch devices, tapping a multi-problem bubble splits it first
+          if (
+            lastPointerTypeRef.current === 'touch' &&
+            b.problems.length > 1 &&
+            hoveredClusterIdRef.current !== b.id
+          ) {
+            hoveredClusterIdRef.current = b.id;
+            return;
+          }
           onBubbleClickRef.current(b.id);
           break;
         }
@@ -403,6 +618,7 @@ export default function BubbleCanvas({
 
     canvas.addEventListener('wheel', handleWheel, { passive: false });
     canvas.addEventListener('pointerdown', handlePointerDown);
+    canvas.addEventListener('pointerleave', handlePointerLeave);
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
     window.addEventListener('pointercancel', handlePointerUp);
@@ -530,9 +746,61 @@ export default function BubbleCanvas({
       const activeGlowId = glowBubbleIdRef.current;
       const font = fontFamilyRef.current;
 
-      // Render step with viewport culling
+      // Update hover target with generous anti-flicker ring for split bubbles
+      if (lastPointerTypeRef.current !== 'touch' && activePointers.size === 0) {
+        const ptr = pointerWorldRef.current;
+        if (ptr) {
+          let nextHoverId: string | null = null;
+          const currentHoverId = hoveredClusterIdRef.current;
+
+          if (currentHoverId && physicsState.current[currentHoverId]) {
+            const hb = physicsState.current[currentHoverId];
+            if (hb.problems.length > 1 && hb.splitProgress > 0.05) {
+              const layout = getSubBubbleOffsets(hb);
+              const hitZone = layout.orbitRadius + layout.subRadius + 28;
+              if (Math.hypot(ptr.x - hb.x, ptr.y - hb.y) <= hitZone) {
+                nextHoverId = hb.id;
+              }
+            }
+          }
+
+          if (!nextHoverId) {
+            for (let i = bubbles.length - 1; i >= 0; i--) {
+              const b = bubbles[i];
+              if (Math.hypot(ptr.x - b.x, ptr.y - b.y) <= b.radius * 1.1) {
+                nextHoverId = b.id;
+                break;
+              }
+            }
+          }
+
+          hoveredClusterIdRef.current = nextHoverId;
+          canvas.style.cursor = nextHoverId ? 'pointer' : 'grab';
+        }
+      }
+
+      // Advance split/merge animations and find max active split for background dimming
+      let maxSplit = 0;
+      const hoveredId = hoveredClusterIdRef.current;
       for (let i = 0; i < bubbles.length; i++) {
         const b = bubbles[i];
+        const targetSplit = hoveredId === b.id && b.problems.length > 1 ? 1 : 0;
+        b.splitProgress += (targetSplit - b.splitProgress) * 0.16;
+        if (b.splitProgress < 0.004 && targetSplit === 0) b.splitProgress = 0;
+        if (b.splitProgress > 0.996 && targetSplit === 1) b.splitProgress = 1;
+        if (b.splitProgress > maxSplit) maxSplit = b.splitProgress;
+      }
+
+      const splitBubbles: BubbleNode[] = [];
+
+      // Render non-splitting bubbles first with viewport culling
+      for (let i = 0; i < bubbles.length; i++) {
+        const b = bubbles[i];
+        if (b.splitProgress > 0.005 && b.problems.length > 1) {
+          splitBubbles.push(b);
+          continue;
+        }
+
         const cullMargin = b.radius * 1.3 + 20;
         if (
           b.x + cullMargin < viewMinX ||
@@ -554,12 +822,17 @@ export default function BubbleCanvas({
         if (query) {
           const t = (b.title || '').toLowerCase();
           const c = (b.category || '').toLowerCase();
-          if (!t.includes(query) && !c.includes(query)) matchesFilter = false;
+          const anySub = b.problems.some((p) => p.text.toLowerCase().includes(query));
+          if (!t.includes(query) && !c.includes(query) && !anySub) matchesFilter = false;
         }
+
+        const isHoveredSingle = hoveredId === b.id;
 
         ctx.save();
         if (!matchesFilter) {
           ctx.globalAlpha = 0.16;
+        } else if (maxSplit > 0.01) {
+          ctx.globalAlpha = 1 - maxSplit * 0.65;
         }
 
         let drawColor = b.color;
@@ -568,7 +841,17 @@ export default function BubbleCanvas({
           drawColor = PALETTE[colorIndex];
         }
 
-        drawAmoeba(ctx, b.x, b.y, b.radius, time, b.seed, drawColor, b.hasClaims);
+        drawAmoeba(
+          ctx,
+          b.x,
+          b.y,
+          b.radius,
+          time,
+          b.seed,
+          drawColor,
+          b.hasClaims,
+          isHoveredSingle
+        );
 
         if (b.radius * zoom > 16) {
           const isDark = themeRef.current === 'dark';
@@ -582,7 +865,102 @@ export default function BubbleCanvas({
 
           ctx.font = `12px ${font}`;
           ctx.fillStyle = isDark ? 'rgba(245, 236, 238, 0.78)' : 'rgba(74, 58, 61, 0.75)';
-          ctx.fillText(`${b.totalWeight} votes`, b.x, b.y + 13);
+          const subLabel =
+            b.problems.length > 1
+              ? `${b.totalWeight} votes · ${b.problems.length} nuances`
+              : `${b.totalWeight} votes`;
+          ctx.fillText(subLabel, b.x, b.y + 13);
+        }
+
+        ctx.restore();
+      }
+
+      // Render splitting / split clusters on top so sub-bubbles are highlighted & unobstructed
+      const ptr = pointerWorldRef.current;
+      const isDark = themeRef.current === 'dark';
+      for (let sIdx = 0; sIdx < splitBubbles.length; sIdx++) {
+        const b = splitBubbles[sIdx];
+        const layout = getSubBubbleOffsets(b);
+        const p = b.splitProgress;
+
+        ctx.save();
+
+        // Soft outer halo ring indicating the merged group boundary
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, (layout.orbitRadius + layout.subRadius + 10) * p, 0, Math.PI * 2);
+        ctx.strokeStyle = b.color;
+        ctx.globalAlpha = 0.25 * p;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 6]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Tether lines from parent center to each sub-bubble
+        ctx.globalAlpha = 0.4 * p;
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 2;
+        for (let k = 0; k < layout.items.length; k++) {
+          const item = layout.items[k];
+          if (item.dx === 0 && item.dy === 0) continue;
+          ctx.beginPath();
+          ctx.moveTo(b.x, b.y);
+          ctx.lineTo(b.x + item.dx * p, b.y + item.dy * p);
+          ctx.stroke();
+        }
+
+        ctx.globalAlpha = 1;
+
+        for (let k = 0; k < layout.items.length; k++) {
+          const item = layout.items[k];
+          const sx = b.x + item.dx * p;
+          const sy = b.y + item.dy * p;
+          const sr = b.radius + (layout.subRadius - b.radius) * p;
+          const isSubHovered =
+            Boolean(ptr) && Math.hypot(ptr!.x - sx, ptr!.y - sy) <= sr * 1.05;
+
+          drawAmoeba(
+            ctx,
+            sx,
+            sy,
+            isSubHovered ? sr * 1.06 : sr,
+            time,
+            b.seed + k * 1.7,
+            b.color,
+            k === 0 && b.hasClaims,
+            true
+          );
+
+          if (p > 0.35 && sr * zoom > 16) {
+            ctx.save();
+            ctx.globalAlpha = Math.min(1, (p - 0.35) / 0.45);
+            ctx.fillStyle = isDark ? '#FFF7F9' : '#2E2225';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = `600 12px ${font}`;
+            drawWrappedText(ctx, item.problem.text, sx, sy, sr * 1.55, 14, 3);
+            ctx.restore();
+          }
+        }
+
+        if (b.hiddenProblemCount > 0 && p > 0.5) {
+          ctx.save();
+          ctx.globalAlpha = (p - 0.5) * 2;
+          const badgeY = b.y + (layout.orbitRadius + layout.subRadius + 24) * p;
+          const label = `+${b.hiddenProblemCount} more nuances (click to view all)`;
+          ctx.font = `600 12px ${font}`;
+          const textW = ctx.measureText(label).width + 20;
+          ctx.fillStyle = isDark ? 'rgba(30, 24, 26, 0.9)' : 'rgba(255, 255, 255, 0.92)';
+          ctx.strokeStyle = b.color;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.roundRect(b.x - textW / 2, badgeY - 13, textW, 26, 13);
+          ctx.fill();
+          ctx.stroke();
+          ctx.fillStyle = isDark ? '#F5ECEE' : '#4A3A3D';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(label, b.x, badgeY);
+          ctx.restore();
         }
 
         ctx.restore();
@@ -597,6 +975,7 @@ export default function BubbleCanvas({
     return () => {
       canvas.removeEventListener('wheel', handleWheel);
       canvas.removeEventListener('pointerdown', handlePointerDown);
+      canvas.removeEventListener('pointerleave', handlePointerLeave);
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
       window.removeEventListener('pointercancel', handlePointerUp);
